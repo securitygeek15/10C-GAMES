@@ -1,0 +1,14 @@
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\bin\Debug\net10.0\DungeonDash.exe
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\bin\Debug\net10.0\DungeonDash.deps.json
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\bin\Debug\net10.0\DungeonDash.runtimeconfig.json
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\bin\Debug\net10.0\DungeonDash.dll
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\bin\Debug\net10.0\DungeonDash.pdb
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\obj\Debug\net10.0\DungeonDash.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\obj\Debug\net10.0\DungeonDash.AssemblyInfoInputs.cache
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\obj\Debug\net10.0\DungeonDash.AssemblyInfo.cs
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\obj\Debug\net10.0\DungeonDash.csproj.CoreCompileInputs.cache
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\obj\Debug\net10.0\DungeonDash.dll
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\obj\Debug\net10.0\refint\DungeonDash.dll
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\obj\Debug\net10.0\DungeonDash.pdb
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\obj\Debug\net10.0\DungeonDash.genruntimeconfig.cache
+C:\Users\amaan\OneDrive\Desktop\10c#games\DungeonDash\obj\Debug\net10.0\ref\DungeonDash.dll
