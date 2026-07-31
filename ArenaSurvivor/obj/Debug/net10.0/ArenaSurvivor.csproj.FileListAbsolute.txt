@@ -1,0 +1,14 @@
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\bin\Debug\net10.0\ArenaSurvivor.exe
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\bin\Debug\net10.0\ArenaSurvivor.deps.json
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\bin\Debug\net10.0\ArenaSurvivor.runtimeconfig.json
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\bin\Debug\net10.0\ArenaSurvivor.dll
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\bin\Debug\net10.0\ArenaSurvivor.pdb
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\obj\Debug\net10.0\ArenaSurvivor.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\obj\Debug\net10.0\ArenaSurvivor.AssemblyInfoInputs.cache
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\obj\Debug\net10.0\ArenaSurvivor.AssemblyInfo.cs
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\obj\Debug\net10.0\ArenaSurvivor.csproj.CoreCompileInputs.cache
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\obj\Debug\net10.0\ArenaSurvivor.dll
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\obj\Debug\net10.0\refint\ArenaSurvivor.dll
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\obj\Debug\net10.0\ArenaSurvivor.pdb
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\obj\Debug\net10.0\ArenaSurvivor.genruntimeconfig.cache
+C:\Users\amaan\OneDrive\Desktop\10c#games\ArenaSurvivor\obj\Debug\net10.0\ref\ArenaSurvivor.dll
