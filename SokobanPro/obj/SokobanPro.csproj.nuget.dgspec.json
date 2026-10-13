@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\amaan\\OneDrive\\Desktop\\10c#games\\SokobanPro\\SokobanPro.csproj": {}
+    "C:\\Users\\amaan\\Desktop\\10c#games\\SokobanPro\\SokobanPro.csproj": {}
   },
   "projects": {
-    "C:\\Users\\amaan\\OneDrive\\Desktop\\10c#games\\SokobanPro\\SokobanPro.csproj": {
+    "C:\\Users\\amaan\\Desktop\\10c#games\\SokobanPro\\SokobanPro.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\amaan\\OneDrive\\Desktop\\10c#games\\SokobanPro\\SokobanPro.csproj",
+        "projectUniqueName": "C:\\Users\\amaan\\Desktop\\10c#games\\SokobanPro\\SokobanPro.csproj",
         "projectName": "SokobanPro",
-        "projectPath": "C:\\Users\\amaan\\OneDrive\\Desktop\\10c#games\\SokobanPro\\SokobanPro.csproj",
-        "packagesPath": "C:\\Users\\CodexSandboxOffline\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\amaan\\OneDrive\\Desktop\\10c#games\\SokobanPro\\obj\\",
+        "projectPath": "C:\\Users\\amaan\\Desktop\\10c#games\\SokobanPro\\SokobanPro.csproj",
+        "packagesPath": "C:\\Users\\amaan\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\amaan\\Desktop\\10c#games\\SokobanPro\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\amaan\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -35,7 +35,7 @@
           ]
         },
         "restoreAuditProperties": {
-          "enableAudit": "false",
+          "enableAudit": "true",
           "auditLevel": "low",
           "auditMode": "all"
         },

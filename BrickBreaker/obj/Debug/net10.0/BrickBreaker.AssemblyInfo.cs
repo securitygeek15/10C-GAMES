@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("BrickBreaker")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5b7617ae8f3300cb8ea74c9abd9fa2a888d9488f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+21f719672ce8681cc91ea9147860e6f4a9609af4")]
 [assembly: System.Reflection.AssemblyProductAttribute("BrickBreaker")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BrickBreaker")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

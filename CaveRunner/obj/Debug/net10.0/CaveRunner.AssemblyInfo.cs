@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("CaveRunner")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+21f719672ce8681cc91ea9147860e6f4a9609af4")]
 [assembly: System.Reflection.AssemblyProductAttribute("CaveRunner")]
 [assembly: System.Reflection.AssemblyTitleAttribute("CaveRunner")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

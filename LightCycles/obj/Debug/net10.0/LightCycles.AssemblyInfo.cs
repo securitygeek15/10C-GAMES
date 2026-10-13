@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("LightCycles")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+aae50ae6cf9dbd4030e43cba9d328bb3c791b41e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+21f719672ce8681cc91ea9147860e6f4a9609af4")]
 [assembly: System.Reflection.AssemblyProductAttribute("LightCycles")]
 [assembly: System.Reflection.AssemblyTitleAttribute("LightCycles")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
