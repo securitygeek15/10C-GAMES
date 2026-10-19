@@ -4,5 +4,10 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>VibeCheck</RootNamespace>
+    <AssemblyName>VibeCheck</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Shared/Engine.cs" Link="Engine.cs" />
+  </ItemGroup>
 </Project>
