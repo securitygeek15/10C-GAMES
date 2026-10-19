@@ -4,5 +4,10 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>BrainrotBlaster</RootNamespace>
+    <AssemblyName>BrainrotBlaster</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Shared/Engine.cs" Link="Engine.cs" />
+  </ItemGroup>
 </Project>
