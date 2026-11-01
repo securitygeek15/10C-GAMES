@@ -110,6 +110,15 @@ public sealed class Canvas
         Array.Fill(_fg, 0);
     }
 
+    /// <summary>Darkens everything drawn so far. Unlike OverlayK this only touches
+    /// the current contents, so a card drawn afterwards stays at full brightness.</summary>
+    public void Dim(double k)
+    {
+        if (k >= 0.999) return;
+        for (var i = 0; i < _fg.Length; i++)
+            if (_fg[i] != 0) _fg[i] = Col.Scale(_fg[i], k);
+    }
+
     public void Set(int x, int y, char c, int color)
     {
         x += ShakeX;
@@ -331,10 +340,6 @@ public sealed class Fx
     /// <summary>Tiny quick sparkle.</summary>
     public void Spark(double x, double y, int c, int n = 8, double speed = 9)
         => Burst(x, y, n, c, null, speed, 0.32, 0, 4.5, '·');
-
-    public void Clear() => _parts.Clear();
-
-    public int Count => _parts.Count;
 
     public void Update(double dt)
     {
@@ -731,31 +736,6 @@ public static class Ui
             var ch = full[(off + x) % full.Length];
             var u = cv.W <= 1 ? 0 : (double)x / (cv.W - 1);
             cv.Set(x, y, ch, ch == ' ' ? 0 : Col.Mix(c1, c2, u));
-        }
-    }
-
-    /// <summary>Deterministic twinkling backdrop. Draw before everything else.</summary>
-    public static void Backdrop(Canvas cv, double t, int c1, int c2, double density = 0.022)
-    {
-        for (var y = 0; y < cv.H; y++)
-            for (var x = 0; x < cv.W; x++)
-            {
-                var h = Hash(x, y);
-                if (h > density) continue;
-                var tw = 0.5 + 0.5 * Math.Sin(t * 1.8 + h * 420.0);
-                var ch = tw > 0.78 ? '✦' : tw > 0.5 ? '·' : '.';
-                cv.Set(x, y, ch, Col.Mix(Col.Scale(c1, 0.35 + 0.65 * tw), c2, (h * 7.31) % 1.0));
-            }
-    }
-
-    public static double Hash(int x, int y)
-    {
-        unchecked
-        {
-            var h = (uint)(x * 374761393 + y * 668265263);
-            h = (h ^ (h >> 13)) * 1274126177u;
-            h ^= h >> 16;
-            return h % 100000 / 100000.0;
         }
     }
 
