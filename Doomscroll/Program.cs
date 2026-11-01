@@ -10,12 +10,22 @@ if (W == 0)
 }
 
 var cv = new Canvas(W, H);
+Settings.Apply(cv);
 var fx = new Fx();
 var rng = new Random();
 var best = Store.Best("doomscroll");
 var pops = new List<Pop>();
 var post = new Post();
-var state = 0;
+const int Title = 0;
+const int Playing = 1;
+const int Dead = 2;
+const int Paused = 3;
+const int Help = 4;
+var state = Title;
+var titleMenu = new Menu("start scrolling", "how to play", "quit");
+var deadMenu = new Menu("scroll again", "title screen", "quit");
+var pauseMenu = Settings.PauseMenu();
+var toasts = new Toasts();
 var battery = 4;
 var score = 0;
 var combo = 0;
@@ -74,6 +84,12 @@ void lastAnswer(bool ok)
         bestCombo = Math.Max(bestCombo, combo);
         var gain = 10 * combo;
         score += gain;
+        if (combo % 5 == 0 && battery < 4)
+        {
+            battery++;
+            toasts.Push("battery +1, healthy scrolling", 0x7ff5e3);
+            AddPop(" +1 battery", 0x7ff5e3, 0.95);
+        }
         verdict = Verdicts.Good[rng.Next(Verdicts.Good.Length)];
         verdictCol = 0x7ff5e3;
         pauseT = 0.4;
@@ -125,19 +141,41 @@ GameLoop.Run((dt, t) =>
     if (flash > 0) flash = Math.Max(0, flash - dt * 2.4);
     stateT += dt;
 
-    if (state == 0)
+    if (state == Title)
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.Enter))
+        var pick = titleMenu.Update();
+        if (pick == 0)
         {
             Start();
-            state = 1;
+            state = Playing;
             stateT = 0;
         }
+        else if (pick == 1) { state = Help; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
-    else if (state == 1)
+    else if (state == Help)
+    {
+        if (Input.Confirm || Input.Back || Input.Quit) { state = Title; stateT = 0; }
+    }
+    else if (state == Paused)
+    {
+        var pick = pauseMenu.Update();
+        if (pick >= 0)
+        {
+            if (pick == 0) state = Playing;
+            else if (pick == 1) { Start(); state = Playing; }
+            else if (pick == 5) { state = Title; stateT = 0; }
+            else Settings.PauseAction(pick);
+        }
+        if (Input.Pause) state = Playing;
+        if (Input.Quit) return false;
+        Settings.RefreshPauseLabels(pauseMenu);
+    }
+    else if (state == Playing)
     {
         if (Input.Quit) return false;
+        if (Input.Pause) { state = Paused; pauseMenu.Index = 0; }
         if (pauseT > 0)
         {
             pauseT -= dt;
@@ -161,8 +199,10 @@ GameLoop.Run((dt, t) =>
     }
     else
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.R)) { Start(); state = 1; stateT = 0; }
-        if (Input.Hit(ConsoleKey.Escape)) { state = 0; stateT = 0; }
+        var pick = deadMenu.Update();
+        if (pick == 0 || Input.Hit(ConsoleKey.R)) { Start(); state = Playing; stateT = 0; }
+        else if (pick == 1) { state = Title; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
 
@@ -192,6 +232,7 @@ GameLoop.Run((dt, t) =>
     }
 
     fx.Update(dt);
+    toasts.Update(dt);
     for (var i = pops.Count - 1; i >= 0; i--)
     {
         var p = pops[i];
@@ -206,29 +247,32 @@ GameLoop.Run((dt, t) =>
     cv.ShakeY = shake > 0.3 ? rng.Next(-(int)shake, (int)shake + 1) : 0;
     DrawBackdrop();
 
-    if (state == 0)
+    if (state == Title)
     {
         DrawTitle();
         fx.Draw(cv);
         DrawPops();
+    }
+    else if (state == Help)
+    {
+        DrawHelp();
+        fx.Draw(cv);
     }
     else
     {
         DrawPhone();
         fx.Draw(cv);
         DrawPops();
-        if (state == 2) DrawDead();
+        if (state == Dead) DrawDead();
+        if (state == Paused) DrawPause();
     }
+
+    toasts.Draw(cv, 1);
 
     if (flash > 0.01)
     {
         cv.OverlayColor = flashCol;
         cv.OverlayK = Math.Min(0.8, flash);
-    }
-    else if (state == 2)
-    {
-        cv.OverlayColor = 0x000000;
-        cv.OverlayK = 0.28;
     }
     else cv.OverlayK = 0;
 
@@ -388,31 +432,69 @@ void DrawPops()
 void DrawTitle()
 {
     var t = fx.Time;
-    var title = "d o o m s c r o l l";
-    var x = (W - title.Length) / 2;
-    cv.TextGrad(x, 8, title, 0xff4fa3, 0xb9a7ff, (t * 0.15) % 1);
-    cv.TextGrad(x, 9, "────────────────────", 0xff4fa3, 0x7ff5e3, (t * 0.15) % 1);
-    cv.TextC("a terminal game about touching grass", 0xd8cfe8, 11);
-    cv.TextC("(eventually)", 0x6e6888, 12);
-    if (best > 0) cv.TextC($"best: {Fmt(best)} followers", 0xffd166, 14);
-    if (t % 1.3 < 0.8) cv.TextC("PRESS SPACE TO SCROLL", 0xffffff, 17);
-    cv.TextC("← skip      → like      ↓ block", 0x8a84a2, 20);
-    cv.TextC("q quits. the feed does not.", 0x4e4a62, 22);
+    var top = Math.Max(2, (H - 15) / 2);
+    Ui.BigTitle(cv, top, "doomscroll", 0xff4fa3, 0xb9a7ff, t);
+    Ui.TextShadowC(cv, top + 2, "a terminal game about touching grass", 0xd8cfe8);
+    cv.TextC("(eventually)", 0x6e6888, top + 3);
+
+    titleMenu.Draw(cv, top + 5);
+
+    if (best > 0)
+    {
+        var label = $"best {Fmt(best)} followers";
+        Ui.Badge(cv, (W - label.Length - 2) / 2, top + 9, label, 0xffd166, 0x241a08);
+    }
+
+    Ui.Ticker(cv, H - 3, "screen time 3h 47m  ·  the feed is infinite  ·  touch grass eventually  ·  for you page",
+        t, 0xff8fc8, 0xb9a7ff, 7);
+    Ui.Hints(cv, H - 1, "W/S", "select", "ENTER", "pick", "Q", "quit");
+}
+
+void DrawHelp()
+{
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(58, W - 2), Math.Min(18, H - 2), "how to play", 0xff4fa3);
+    var x = x0 + 3;
+    var y = y0 + 2;
+    y += Ui.WrapDraw(cv, x, y,
+        "the feed never ends. every post is slay, cringe or an ad, and each one wants a different reaction.",
+        x1 - x - 2, Ui.Ink, 3) + 1;
+    Ui.KeyHint(cv, x, y, "←/A", "skip the boring ones", 0xb9a7ff); y++;
+    Ui.KeyHint(cv, x, y, "→/D", "like the slay ones", 0xff4fa3); y++;
+    Ui.KeyHint(cv, x, y, "↓/S", "block the cringe and the ads", Ui.Gold); y++;
+    Ui.KeyHint(cv, x, y, "P", "pause + settings", Ui.Accent2); y += 2;
+    cv.Text(x, y, "wrong answer or a freeze costs a battery.", Ui.InkDim); y++;
+    cv.Text(x, y, "every 5-streak charges one back.", Ui.Accent2);
+    cv.TextC("enter / esc to go back", Ui.InkFaint, y1 - 1);
+}
+
+void DrawPause()
+{
+    cv.Dim(0.45);
+    Settings.RefreshPauseLabels(pauseMenu);
+    var (_, y0, _, y1) = Ui.CenterCard(cv, 38, 11, "paused", Ui.Accent);
+    pauseMenu.Draw(cv, y0 + 2);
+    cv.TextC("P / ESC to resume", Ui.InkFaint, y1 - 1);
 }
 
 void DrawDead()
 {
-    PhoneGeom(out var x0, out var y0, out var x1, out var y1);
-    cv.Fill(x0 + 1, y0 + 1, x1 - 1, y1 - 1, ' ', 0x07070c);
-    var cy = y0 + 6;
-    cv.TextC("SCREEN TIME REPORT", 0xff4fa3, cy);
-    cv.TextC("your battery died at 3:47am", 0x8a84a2, cy + 2);
-    cv.TextC($"{Fmt(score)} followers", 0xffffff, cy + 5);
-    cv.TextC($"{rounds} posts scrolled    best streak x{bestCombo}", 0xb9a7ff, cy + 6);
-    cv.TextC(newRecord ? "new personal best (concerning)" : $"best: {Fmt(best)}", newRecord ? 0xffd166 : 0x6e6888, cy + 8);
-    if (fx.Time % 1.1 < 0.75) cv.TextC("SPACE rot again    ESC title    Q quit", 0xd8cfe8, cy + 11);
-    cv.TextC("consider touching grass.", 0x5c8a5c, cy + 13);
-    cv.TextC("▱▱▱▱  0%", 0xff4d6d, y1 - 2);
+    cv.Dim(0.4);
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(54, W - 2), Math.Min(18, H - 2), "screen time report", 0xff4fa3);
+    var cx = (x0 + x1) / 2;
+    cv.TextC("your battery died at 3:47am", 0x8a84a2, y0 + 2);
+
+    var (rank, tier) = Ui.Rank(score, new[] { 50, 150, 300, 600, 1000, 1600 });
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 4, "followers", Fmt(score), 0xffffff);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 5, "posts scrolled", rounds.ToString(), 0xb9a7ff);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 6, "best streak", $"x{bestCombo}", 0xff8fc8);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 7, "rank", rank, Ui.RankColor(tier));
+    Ui.Divider(cv, x0 + 2, x1 - 2, y0 + 9);
+    if (newRecord) Ui.NewBest(cv, cx, y0 + 10, fx.Time);
+    else Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 10, "best", Fmt(best), 0xffd166);
+
+    cv.TextC("consider touching grass.", 0x6fa86f, y0 + 12);
+    deadMenu.Draw(cv, y0 + 13);
+    cv.TextC("R to rot again", Ui.InkFaint, y1 - 1);
 }
 
 string Fmt(int n) => n >= 1000 ? $"{n / 1000.0:0.#}k" : n.ToString();
