@@ -10,6 +10,7 @@ if (W == 0)
 }
 
 var cv = new Canvas(W, H);
+Settings.Apply(cv);
 var fx = new Fx();
 var rng = new Random();
 var best = Store.Best("bratsummer");
@@ -18,7 +19,16 @@ var occ = new HashSet<(int X, int Y)>();
 var obstacles = new HashSet<(int X, int Y)>();
 var inputQ = new Queue<(int X, int Y)>();
 var pops = new List<Pop>();
-var state = 0;
+const int Title = 0;
+const int Playing = 1;
+const int Dead = 2;
+const int Paused = 3;
+const int Help = 4;
+var state = Title;
+var titleMenu = new Menu("party", "how to play", "quit");
+var deadMenu = new Menu("party again", "title screen", "quit");
+var pauseMenu = Settings.PauseMenu();
+var toasts = new Toasts();
 var dir = (X: 1, Y: 0);
 var food = (X: 0, Y: 0);
 var foodParty = false;
@@ -101,6 +111,14 @@ void Step()
     var head = snake.First!.Value;
     var nx = head.X + dir.X;
     var ny = head.Y + dir.Y;
+    // party mode lets you run off one side and come back on the other
+    if (partyT > 0)
+    {
+        if (nx < fx0) nx = fx0 + fw - 1;
+        else if (nx >= fx0 + fw) nx = fx0;
+        if (ny < fy0) ny = fy0 + fh - 1;
+        else if (ny >= fy0 + fh) ny = fy0;
+    }
     if (nx < fx0 || nx >= fx0 + fw || ny < fy0 || ny >= fy0 + fh || occ.Contains((nx, ny)) || obstacles.Contains((nx, ny)))
     {
         Die();
@@ -132,6 +150,7 @@ void Eat()
         flash = 0.25;
         flashCol = lime;
         fx.Ring(food.X + 0.5, food.Y + 0.5, 20, 22, 0.6, lime, 0xffffff, '✦');
+        toasts.Push("party mode: walls are optional", lime);
     }
     fx.Burst(food.X + 0.5, food.Y + 0.5, 20, lime, 0xffffff, 14, 0.65, 6, 2.5, '✦');
     AddPop(food.X, food.Y, $"+{gain}", lime);
@@ -185,17 +204,39 @@ GameLoop.Run((dt, t) =>
     if (partyT > 0) partyT = Math.Max(0, partyT - dt);
     stateT += dt;
 
-    if (state == 0)
+    if (state == Title)
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.Enter)) { Start(); state = 1; }
+        var pick = titleMenu.Update();
+        if (pick == 0) { Start(); state = Playing; }
+        else if (pick == 1) { state = Help; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
         if (rng.NextDouble() < 0.3)
             fx.Spawn(rng.Next(W), H, (rng.NextDouble() - 0.5) * 2, -2 - rng.NextDouble() * 4,
                 4.5, lime, 0x1a2a00, rng.Next(2) == 0 ? '✦' : '·', 0, 0.05);
     }
-    else if (state == 1)
+    else if (state == Help)
+    {
+        if (Input.Confirm || Input.Back || Input.Quit) { state = Title; stateT = 0; }
+    }
+    else if (state == Paused)
+    {
+        var pick = pauseMenu.Update();
+        if (pick >= 0)
+        {
+            if (pick == 0) state = Playing;
+            else if (pick == 1) { Start(); state = Playing; }
+            else if (pick == 5) { state = Title; stateT = 0; }
+            else Settings.PauseAction(pick);
+        }
+        if (Input.Pause) state = Playing;
+        if (Input.Quit) return false;
+        Settings.RefreshPauseLabels(pauseMenu);
+    }
+    else if (state == Playing)
     {
         if (Input.Quit) return false;
+        if (Input.Pause) { state = Paused; pauseMenu.Index = 0; stateT = 0; }
         if (Input.Hit(ConsoleKey.UpArrow) || Input.Hit(ConsoleKey.W)) QueueDir(0, -1);
         if (Input.Hit(ConsoleKey.DownArrow) || Input.Hit(ConsoleKey.S)) QueueDir(0, 1);
         if (Input.Hit(ConsoleKey.LeftArrow) || Input.Hit(ConsoleKey.A)) QueueDir(-1, 0);
@@ -211,12 +252,15 @@ GameLoop.Run((dt, t) =>
     }
     else
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.R)) { Start(); state = 1; }
-        if (Input.Hit(ConsoleKey.Escape)) { state = 0; stateT = 0; }
+        var pick = deadMenu.Update();
+        if (pick == 0 || Input.Hit(ConsoleKey.R)) { Start(); state = Playing; }
+        else if (pick == 1) { state = Title; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
 
     fx.Update(dt);
+    toasts.Update(dt);
     for (var i = pops.Count - 1; i >= 0; i--)
     {
         var p = pops[i];
@@ -230,9 +274,14 @@ GameLoop.Run((dt, t) =>
     cv.ShakeY = shake > 0.3 ? rng.Next(-(int)shake, (int)shake + 1) : 0;
     DrawBackdrop();
 
-    if (state == 0)
+    if (state == Title)
     {
         DrawTitle();
+        fx.Draw(cv);
+    }
+    else if (state == Help)
+    {
+        DrawHelp();
         fx.Draw(cv);
     }
     else
@@ -242,18 +291,16 @@ GameLoop.Run((dt, t) =>
         fx.Draw(cv);
         DrawPops();
         DrawHud();
-        if (state == 2) DrawDead();
+        if (state == Dead) DrawDead();
+        if (state == Paused) DrawPause();
     }
+
+    toasts.Draw(cv, 1);
 
     if (flash > 0.01)
     {
         cv.OverlayColor = flashCol;
         cv.OverlayK = Math.Min(0.55, flash);
-    }
-    else if (state == 2)
-    {
-        cv.OverlayColor = 0x000000;
-        cv.OverlayK = 0.3;
     }
     else cv.OverlayK = 0;
 
@@ -331,7 +378,7 @@ void DrawEntities()
         cv.Set(o.X, o.Y, '▨', c);
     }
 
-    if (state is 1 or 2)
+    if (state is Playing or Dead or Paused)
     {
         var i = 0;
         var n = snake.Count;
@@ -364,13 +411,12 @@ void DrawHud()
     cv.TextRight($"best {best:000000}", W - 3, 0, 0x5a7a2a);
     cv.Text(2, 1, $"length {snake.Count}   lime {foods}", 0x6a8a3a);
     if (partyT > 0)
-        cv.TextC($"PARTY MODE {partyT:0.0}", Col.Hsl(hue, 0.9, 0.6), 1);
+        cv.TextC($"PARTY MODE {partyT:0.0} · x2 · walls off", Col.Hsl(hue, 0.9, 0.6), 1);
     else
         cv.TextC("x1", 0x6a8a3a, 1);
-    cv.TextRight("q quit", W - 3, 1, 0x4a5a2a);
     var phrase = phrases[(int)(fx.Time / 5) % phrases.Length];
     cv.TextC(phrase, 0x3e5020, H - 2);
-    cv.TextC("wasd / arrows move     q quit", 0x3e5020, H - 1);
+    Ui.Hints(cv, H - 1, "WASD", "move", "P", "pause");
 }
 
 void DrawPops()
@@ -385,35 +431,67 @@ void DrawPops()
 void DrawTitle()
 {
     var t = fx.Time;
-    var bandY = Math.Max(4, H / 2 - 5);
-    cv.Fill(3, bandY, W - 4, bandY + 4, ' ', lime);
-    cv.TextC("b r a t   s u m m e r", 0x0a0a0a, bandY + 1);
+    var bandY = Math.Max(2, (H - 16) / 2);
+    cv.Fill(3, bandY, W - 4, bandY + 5, ' ', lime);
+    cv.TextC("B R A T   S U M M E R", 0x0a0a0a, bandY + 1);
     cv.TextC("365 party girl", 0x1a2a00, bandY + 3);
     cv.Set(5, bandY + 2, '✦', 0x0a0a0a);
     cv.Set(W - 6, bandY + 2, '✦', 0x0a0a0a);
 
-    cv.TextC("eat the lime. dodge the responsibilities.", 0xd8ff9a, bandY + 7);
-    cv.TextC("it's giving snake. it's giving summer.", 0x6a8a3a, bandY + 8);
-    if (best > 0) cv.TextC($"best {best:000000}", 0xffffff, bandY + 10);
-    if (t % 1.2 < 0.75) cv.TextC("PRESS SPACE TO PARTY", 0xffffff, bandY + 12);
-    cv.TextC("wasd / arrows move     q quit", 0x5a7a2a, H - 2);
-    cv.TextC("the party is 365 days. hydrate.", 0x3e5020, H - 1);
+    titleMenu.Draw(cv, bandY + 7);
+
+    cv.TextC("eat the lime. dodge the responsibilities.", 0xd8ff9a, bandY + 11);
+    if (best > 0) Ui.Badge(cv, (W - 13) / 2, bandY + 13, $"best {best:000000}", 0xffffff, 0x2a3a00);
+
+    Ui.Ticker(cv, H - 3, "the party is 365 days  ·  it's giving snake  ·  hydrate  ·  so julia",
+        t, 0x6a8a3a, 0x3e5020, 6);
+    Ui.Hints(cv, H - 1, "W/S", "select", "ENTER", "pick", "Q", "quit");
+}
+
+void DrawHelp()
+{
+    var (hx0, hy0, hx1, hy1) = Ui.CenterCard(cv, Math.Min(56, W - 2), Math.Min(17, H - 2), "how to play", lime);
+    var x = hx0 + 3;
+    var y = hy0 + 2;
+    y += Ui.WrapDraw(cv, x, y,
+        "classic snake, but lime green. eat the lime, grow, and do not touch a responsibility or yourself.",
+        hx1 - x - 2, Ui.Ink, 3) + 1;
+    Ui.KeyHint(cv, x, y, "WASD", "move", lime); y++;
+    Ui.KeyHint(cv, x, y, "P", "pause + settings", Ui.Gold); y += 2;
+    cv.Set(x, y, '✦', lime); cv.Text(x + 2, y, "lime: +10 points, grow one", Ui.InkDim); y++;
+    cv.Set(x, y, '★', 0xffffff); cv.Text(x + 2, y, "every 5th lime: party mode, +60 and x2", Ui.InkDim); y++;
+    cv.Text(x, y, "party mode also turns walls into doors.", 0xd8ff9a); y++;
+    cv.Text(x, y, "responsibilities (▨) stack up as you eat.", Ui.InkDim);
+    cv.TextC("enter / esc to go back", Ui.InkFaint, hy1 - 1);
+}
+
+void DrawPause()
+{
+    cv.Dim(0.45);
+    Settings.RefreshPauseLabels(pauseMenu);
+    var (_, py0, _, py1) = Ui.CenterCard(cv, 38, 11, "paused", Ui.Accent);
+    pauseMenu.Draw(cv, py0 + 2);
+    cv.TextC("P / ESC to resume", Ui.InkFaint, py1 - 1);
 }
 
 void DrawDead()
 {
-    var panelW = Math.Min(56, W - 4);
-    var x0p = (W - panelW) / 2;
-    var x1p = x0p + panelW - 1;
-    var y0p = Math.Max(3, H / 2 - 6);
-    var y1p = Math.Min(H - 2, y0p + 10);
-    cv.Fill(x0p, y0p, x1p, y1p, ' ', 0x0b0e05);
-    cv.Frame(x0p, y0p, x1p, y1p, lime);
-    cv.TextC("the party's over.", 0xd8ff9a, y0p + 2);
-    cv.TextC($"brat points {score:000000}    limes {foods}", 0xf4ffe0, y0p + 4);
-    cv.TextC(newRecord ? "new personal best (very brat)" : $"best {best:000000}", newRecord ? 0xffffff : 0x6a8a3a, y0p + 6);
-    cv.TextC("responsibilities: 1    you: 0", 0x8a8a7a, y0p + 8);
-    if (fx.Time % 1.1 < 0.75) cv.TextC("SPACE again    ESC title    Q quit", 0xd8ff9a, y0p + 10);
+    cv.Dim(0.4);
+    var (dx0, dy0, dx1, dy1) = Ui.CenterCard(cv, Math.Min(54, W - 2), Math.Min(18, H - 2), "the party's over", lime);
+    var cx = (dx0 + dx1) / 2;
+    cv.TextC("responsibilities: 1    you: 0", 0x8a8a7a, dy0 + 2);
+
+    var (rank, tier) = Ui.Rank(score, new[] { 100, 250, 450, 700, 1000, 1400 });
+    Ui.ScoreRow(cv, dx0 + 3, dx1 - 3, dy0 + 4, "brat points", $"{score:000000}", 0xf4ffe0);
+    Ui.ScoreRow(cv, dx0 + 3, dx1 - 3, dy0 + 5, "limes", foods.ToString(), lime);
+    Ui.ScoreRow(cv, dx0 + 3, dx1 - 3, dy0 + 6, "length", snake.Count.ToString(), 0xd8ff9a);
+    Ui.ScoreRow(cv, dx0 + 3, dx1 - 3, dy0 + 7, "rank", rank, Ui.RankColor(tier));
+    Ui.Divider(cv, dx0 + 2, dx1 - 2, dy0 + 9);
+    if (newRecord) Ui.NewBest(cv, cx, dy0 + 10, fx.Time);
+    else Ui.ScoreRow(cv, dx0 + 3, dx1 - 3, dy0 + 10, "best", $"{best:000000}", 0xffffff);
+
+    deadMenu.Draw(cv, dy0 + 12);
+    cv.TextC("R to party again", Ui.InkFaint, dy1 - 1);
 }
 
 sealed class Pop
