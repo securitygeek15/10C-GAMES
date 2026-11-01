@@ -10,11 +10,22 @@ if (W == 0)
 }
 
 var cv = new Canvas(W, H);
+Settings.Apply(cv);
 var fx = new Fx();
 var rng = new Random();
 var best = Store.Best("vibecheck");
 var notes = new List<Note>();
-var state = 0;          // 0 title, 1 play, 2 results
+const int Title = 0;
+const int Playing = 1;
+const int Results = 2;
+const int Paused = 3;
+const int Help = 4;
+var state = Title;
+var titleMenu = new Menu("lock in", "how to play", "quit");
+var resultMenu = new Menu("run it back", "title screen", "quit");
+var pauseMenu = Settings.PauseMenu();
+var toasts = new Toasts();
+var fever = false;
 var clock = 0.0;
 var score = 0;
 var combo = 0;
@@ -87,6 +98,7 @@ void Start()
     newRecord = false;
     stateT = 0;
     lastBeatPulse = -1;
+    fever = false;
 }
 
 void TryHit(int lane)
@@ -116,7 +128,14 @@ void TryHit(int lane)
     combo++;
     maxCombo = Math.Max(maxCombo, combo);
     var mult = 1 + Math.Min(4, combo / 10);
+    if (fever) mult *= 2;
     score += baseScore * mult;
+    if (combo == 30 && !fever)
+    {
+        fever = true;
+        toasts.Push("fever mode: double points", 0xffd166);
+        fx.Ring(lane0 + totalW / 2.0, hitY, 30, 20, 0.7, 0xffd166, 0xff8fc8, '✦');
+    }
     judgeText = label;
     judgeCol = delta <= 0.055 ? 0x9be564 : delta <= 0.1 ? 0x7ff5e3 : 0xffd166;
     judgeT = 0.55;
@@ -149,9 +168,12 @@ GameLoop.Run((dt, t) =>
     if (flash > 0) flash = Math.Max(0, flash - dt * 2.5);
     if (judgeT > 0) judgeT = Math.Max(0, judgeT - dt);
 
-    if (state == 0)
+    if (state == Title)
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.Enter)) { Start(); state = 1; }
+        var pick = titleMenu.Update();
+        if (pick == 0) { Start(); state = Playing; }
+        else if (pick == 1) { state = Help; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
         if (rng.NextDouble() < 0.35)
         {
@@ -159,9 +181,28 @@ GameLoop.Run((dt, t) =>
             fx.Spawn(LaneX(lane) + 3, hitY, 0, -6, 1.2, laneColors[lane], 0x2a1a30, '▄', 0, 0);
         }
     }
-    else if (state == 1)
+    else if (state == Help)
+    {
+        if (Input.Confirm || Input.Back || Input.Quit) { state = Title; stateT = 0; }
+    }
+    else if (state == Paused)
+    {
+        var pick = pauseMenu.Update();
+        if (pick >= 0)
+        {
+            if (pick == 0) state = Playing;
+            else if (pick == 1) { Start(); state = Playing; }
+            else if (pick == 5) { state = Title; stateT = 0; }
+            else Settings.PauseAction(pick);
+        }
+        if (Input.Pause) state = Playing;
+        if (Input.Quit) return false;
+        Settings.RefreshPauseLabels(pauseMenu);
+    }
+    else if (state == Playing)
     {
         if (Input.Quit) return false;
+        if (Input.Pause) { state = Paused; pauseMenu.Index = 0; stateT = 0; }
         clock += dt;
 
         if (Input.Hit(ConsoleKey.D)) TryHit(0);
@@ -175,6 +216,11 @@ GameLoop.Run((dt, t) =>
             n.State = 2;
             n.Weight = 0;
             combo = 0;
+            if (fever)
+            {
+                fever = false;
+                toasts.Push("fever broke", 0xff5c7a);
+            }
             judgeText = "miss";
             judgeCol = 0xff5c7a;
             judgeT = 0.4;
@@ -192,18 +238,29 @@ GameLoop.Run((dt, t) =>
     }
     else
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.R)) { Start(); state = 1; }
-        if (Input.Hit(ConsoleKey.Escape)) { state = 0; stateT = 0; }
+        var pick = resultMenu.Update();
+        if (pick == 0 || Input.Hit(ConsoleKey.R)) { Start(); state = Playing; }
+        else if (pick == 1) { state = Title; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
 
     fx.Update(dt);
+    toasts.Update(dt);
+    if (fever && state == Playing && rng.NextDouble() < 0.5)
+        fx.Spawn(lane0 + rng.Next(totalW), hitY - rng.Next(6), 0, -5, 0.6,
+            Col.Hsl(rng.Next(360), 0.9, 0.65), 0x2a1a30, '✦', 0, 0);
 
     cv.Clear();
     DrawBackdrop();
-    if (state == 0)
+    if (state == Title)
     {
         DrawTitle();
+        fx.Draw(cv);
+    }
+    else if (state == Help)
+    {
+        DrawHelp();
         fx.Draw(cv);
     }
     else
@@ -211,8 +268,11 @@ GameLoop.Run((dt, t) =>
         DrawPlayfield();
         fx.Draw(cv);
         DrawHud();
-        if (state == 2) DrawResults();
+        if (state == Results) DrawResults();
+        if (state == Paused) DrawPause();
     }
+
+    toasts.Draw(cv, 1);
 
     if (flash > 0.01)
     {
@@ -315,13 +375,14 @@ void DrawPlayfield()
         cv.Set(lx + 3, y + 1, '▄', Col.Scale(c, 0.5));
     }
 
-    // hit line
+    // hit line, rainbow while fever is up
     var linePulse = 0.55 + 0.45 * Math.Sin(clock * 6);
     for (var lane = 0; lane < 4; lane++)
     {
         var lx = LaneX(lane);
+        var baseCol = fever ? Col.Hsl((fx.Time * 140 + lane * 60) % 360, 0.9, 0.6) : laneColors[lane];
         for (var x = lx; x < lx + laneW; x++)
-            cv.Set(x, hitY, '═', Col.Mix(laneColors[lane], 0xffffff, linePulse * 0.35));
+            cv.Set(x, hitY, '═', Col.Mix(baseCol, 0xffffff, linePulse * 0.35));
     }
 
     // key labels
@@ -338,7 +399,7 @@ void DrawPlayfield()
         cv.TextC(judgeText, Col.Scale(judgeCol, k), hitY - 3);
     }
 
-    if (clock < 2.4 && state == 1)
+    if (clock < 2.4 && state == Playing)
     {
         var n = Math.Max(1, (int)Math.Ceiling((2.4 - clock) / 0.6));
         cv.TextC(n.ToString(), 0xffffff, hitY - 6);
@@ -363,8 +424,13 @@ void DrawHud()
     cv.TextRight("BPM 118", W - 3, 1, 0x5a6a4a);
     var frac = Math.Clamp(clock / songEnd, 0, 1);
     Ui.Bar(cv, 2, 2, W - 5, frac, 0x9be564, 0xff8fc8);
-    cv.TextC("d  f  j  k", 0x5a6a4a, H - 2);
-    cv.TextC("d f j k  hit     q quit", 0x3e4a38, H - 1);
+    if (fever)
+    {
+        var label = "FEVER x2";
+        Ui.Badge(cv, (W - label.Length - 2) / 2, 3, label, 0x1a1205,
+            Col.Mix(0xffd166, 0xff8fc8, 0.5 + 0.5 * Math.Sin(fx.Time * 8)));
+    }
+    Ui.Hints(cv, H - 1, "D/F/J/K", "hit", "P", "pause");
 }
 
 double Accuracy()
@@ -384,42 +450,78 @@ string Grade()
 void DrawTitle()
 {
     var t = fx.Time;
-    var title = "v i b e   c h e c k";
-    var x = (W - title.Length) / 2;
-    cv.TextGrad(x, 6, title, 0x9be564, 0xff8fc8, (t * 0.14) % 1);
-    cv.TextGrad(x, 7, "──────────────────", 0x7ff5e3, 0xb9a7ff, (t * 0.14) % 1);
-    cv.TextC("a rhythm game for people who say \"i'm fine\"", 0xe0f0d8, 9);
-    cv.TextC("d  f  j  k  —  four lanes, one vibe", 0x8a9a78, 10);
+    var top = Math.Max(2, (H - 15) / 2);
+    Ui.BigTitle(cv, top, "vibe check", 0x9be564, 0xff8fc8, t);
+    Ui.TextShadowC(cv, top + 2, "a rhythm game for people who say \"i'm fine\"", 0xe0f0d8);
+    cv.TextC("d  f  j  k  —  four lanes, one vibe", 0x8a9a78, top + 3);
+
+    titleMenu.Draw(cv, top + 5);
 
     for (var lane = 0; lane < 4; lane++)
     {
         var lx = (W - 31) / 2 + lane * 8;
         var pulse = 0.5 + 0.5 * Math.Sin(t * 3 + lane);
         for (var k = 0; k < 5; k++)
-            cv.Set(lx + k, 14 + (int)(Math.Sin(t * 2 + lane) * 2), '▄', laneColors[lane]);
-        cv.Set(lx + 2, 16, (char)('0' + lane + 1), Col.Scale(laneColors[lane], 0.4 + pulse * 0.6));
+            cv.Set(lx + k, top + 10 + (int)(Math.Sin(t * 2 + lane) * 2), '▄', laneColors[lane]);
+        cv.Set(lx + 2, top + 12, (char)('0' + lane + 1), Col.Scale(laneColors[lane], 0.4 + pulse * 0.6));
     }
 
-    if (best > 0) cv.TextC($"best {best:0000000}", 0xffd166, 18);
-    if (t % 1.2 < 0.78) cv.TextC("PRESS SPACE TO LOCK IN", 0xffffff, 20);
-    cv.TextC("d f j k  to hit      q quit", 0x6a7a62, 21);
+    if (best > 0) Ui.Badge(cv, (W - 15) / 2, top + 14, $"best {best:0000000}", 0xffd166, 0x241a08);
+
+    Ui.Ticker(cv, H - 3, "118 bpm  ·  hit on the line  ·  thirty hit combo unlocks fever  ·  your vibe is intact",
+        t, 0x8a9a78, 0x5a6a4a, 6);
+    Ui.Hints(cv, H - 1, "W/S", "select", "ENTER", "pick", "Q", "quit");
+}
+
+void DrawHelp()
+{
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(58, W - 2), Math.Min(17, H - 2), "how to play", 0x9be564);
+    var x = x0 + 3;
+    var y = y0 + 2;
+    y += Ui.WrapDraw(cv, x, y,
+        "notes fall down four lanes. hit the key for a lane as the note crosses the line. early or late still counts, just for less.",
+        x1 - x - 2, Ui.Ink, 3) + 1;
+    Ui.KeyHint(cv, x, y, "D F J K", "one key per lane", 0x9be564); y++;
+    Ui.KeyHint(cv, x, y, "P", "pause + settings", Ui.Gold); y += 2;
+    cv.Text(x, y, "perfect < 55ms   great < 100ms   good < 160ms", Ui.InkDim); y++;
+    cv.Text(x, y, "30 note combo starts fever: double points", 0xffd166); y++;
+    cv.Text(x, y, "one miss and the fever is gone.", Ui.InkDim);
+    cv.TextC("enter / esc to go back", Ui.InkFaint, y1 - 1);
+}
+
+void DrawPause()
+{
+    cv.Dim(0.45);
+    Settings.RefreshPauseLabels(pauseMenu);
+    var (_, y0, _, y1) = Ui.CenterCard(cv, 38, 11, "paused", Ui.Accent);
+    pauseMenu.Draw(cv, y0 + 2);
+    cv.TextC("P / ESC to resume", Ui.InkFaint, y1 - 1);
 }
 
 void DrawResults()
 {
-    var panelW = Math.Min(58, W - 4);
-    var x0 = (W - panelW) / 2;
-    var x1 = x0 + panelW - 1;
-    var y0 = Math.Max(3, H / 2 - 7);
-    var y1 = Math.Min(H - 2, y0 + 12);
-    cv.Fill(x0, y0, x1, y1, ' ', 0x0a0d08);
-    cv.Frame(x0, y0, x1, y1, 0x9be564);
-
+    cv.Dim(0.35);
     var grade = Grade();
+    var gradeCol = grade switch
+    {
+        "S" => 0xffd166,
+        "A" => 0x9be564,
+        "B" => 0x7ff5e3,
+        "C" => 0xff8fc8,
+        _ => 0xff5c7a
+    };
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(56, W - 2), Math.Min(18, H - 2), "results", gradeCol);
+    var cx = (x0 + x1) / 2;
     cv.TextGrad(x0 + 3, y0 + 2, $"vibe check: {grade}", 0x9be564, 0xff8fc8, (fx.Time * 0.1) % 1);
-    cv.TextC($"score {score:0000000}", 0xf4ffe8, y0 + 4);
-    cv.TextC($"accuracy {Accuracy():0.0}%    max combo x{maxCombo}", 0xb9a7ff, y0 + 5);
-    cv.TextC(newRecord ? "new personal best" : $"best {best:0000000}", newRecord ? 0xffd166 : 0x6a7a62, y0 + 7);
+    var (rank, tier) = Ui.Rank(score, new[] { 5000, 15000, 30000, 50000, 80000, 120000 });
+
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 4, "score", $"{score:0000000}", 0xf4ffe8);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 5, "accuracy", $"{Accuracy():0.0}%", 0x7ff5e3);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 6, "max combo", $"x{maxCombo}", 0xb9a7ff);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 7, "rank", rank, Ui.RankColor(tier));
+    Ui.Divider(cv, x0 + 2, x1 - 2, y0 + 9);
+    if (newRecord) Ui.NewBest(cv, cx, y0 + 10, fx.Time);
+    else Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 10, "best", $"{best:0000000}", 0xffd166);
     cv.TextC(grade switch
     {
         "S" => "main character energy.",
@@ -427,8 +529,10 @@ void DrawResults()
         "B" => "the vibe is vibing.",
         "C" => "the vibe is buffering.",
         _ => "the vibe left the chat."
-    }, 0x8a9a78, y0 + 9);
-    if (fx.Time % 1.1 < 0.76) cv.TextC("SPACE again    ESC title    Q quit", 0xd8e8d0, y0 + 11);
+    }, 0x8a9a78, y0 + 12);
+
+    resultMenu.Draw(cv, y0 + 13);
+    cv.TextC("R to run it back", Ui.InkFaint, y1 - 1);
 }
 
 sealed class Note
