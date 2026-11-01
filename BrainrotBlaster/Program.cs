@@ -10,6 +10,7 @@ if (W == 0)
 }
 
 var cv = new Canvas(W, H);
+Settings.Apply(cv);
 var fx = new Fx();
 var rng = new Random();
 var best = Store.Best("brainrot");
@@ -17,7 +18,18 @@ var bullets = new List<Bullet>();
 var enemies = new List<Enemy>();
 var cells = new List<Cell>();
 var pops = new List<Pop>();
-var state = 0;
+const int Title = 0;
+const int Playing = 1;
+const int Dead = 2;
+const int Paused = 3;
+const int Help = 4;
+var state = Title;
+var titleMenu = new Menu("lock in", "how to play", "quit");
+var deadMenu = new Menu("go again", "title screen", "quit");
+var pauseMenu = Settings.PauseMenu();
+var toasts = new Toasts();
+var bombs = 1;
+var bombsUsed = 0;
 var score = 0;
 var lives = 3;
 var wave = 1;
@@ -60,6 +72,8 @@ void Start()
     waveT = 1.8;
     waveText = "wave 1: the feed awakens";
     newRecord = false;
+    bombs = 1;
+    bombsUsed = 0;
 }
 
 void SpawnEnemy()
@@ -108,6 +122,12 @@ void KillEnemy(Enemy e)
     kills++;
     var val = (e.Type switch { 0 => 50, 1 => 140, 2 => 90, _ => 70 }) * Math.Min(4, 1 + wave / 3);
     score += val;
+    if (kills % 25 == 0)
+    {
+        bombs++;
+        AddPop(playerX, H - 8, "+clout bomb", 0x7ff5e3);
+        toasts.Push("clout bomb +1 (B to drop)", 0x7ff5e3);
+    }
     AddPop(e.X, e.Y, $"+{val}", e.Type == 2 ? 0xffd166 : 0xff9fc4);
     fx.Burst(e.X, e.Y, e.Type == 1 ? 26 : 16, 0xff4fa3, 0x3a1020, 16, 0.65, 3, 2.4, '✖');
     enemies.Remove(e);
@@ -152,6 +172,22 @@ void AddPop(double x, double y, string s, int c)
     pops.Add(new Pop(x - s.Length / 2.0, y, s, c, 0.9, 0.9));
 }
 
+void DropBomb()
+{
+    if (bombs <= 0) return;
+    bombs--;
+    bombsUsed++;
+    var cleared = enemies.Count;
+    foreach (var e in enemies) score += 25;
+    enemies.Clear();
+    AddPop(W / 2.0, H / 2.0 - 1, $"clout bomb: {cleared} gone", 0x7ff5e3);
+    fx.Ring(W / 2.0, H / 2.0, 40, 30, 0.8, 0x7ff5e3, 0xffffff, '✦');
+    shake = 10;
+    flash = 0.3;
+    flashCol = 0x7ff5e3;
+    toasts.Push("clout bomb dropped", 0x7ff5e3);
+}
+
 GameLoop.Run((dt, t) =>
 {
     if (shake > 0) shake = Math.Max(0, shake - dt * 26);
@@ -160,17 +196,40 @@ GameLoop.Run((dt, t) =>
     if (waveT > 0) waveT = Math.Max(0, waveT - dt);
     stateT += dt;
 
-    if (state == 0)
+    if (state == Title)
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.Enter)) { Start(); state = 1; }
+        var pick = titleMenu.Update();
+        if (pick == 0) { Start(); state = Playing; }
+        else if (pick == 1) { state = Help; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
         if (rng.NextDouble() < 0.2)
             fx.Spawn(rng.Next(W), 3, (rng.NextDouble() - 0.5) * 2, 2 + rng.NextDouble() * 3,
                 6, 0x9be564, 0x1a2a10, rng.Next(3) == 0 ? '✖' : '·', 0, 0.05);
     }
-    else if (state == 1)
+    else if (state == Help)
+    {
+        if (Input.Confirm || Input.Back || Input.Quit) { state = Title; stateT = 0; }
+    }
+    else if (state == Paused)
+    {
+        var pick = pauseMenu.Update();
+        if (pick >= 0)
+        {
+            if (pick == 0) state = Playing;
+            else if (pick == 1) { Start(); state = Playing; }
+            else if (pick == 5) { state = Title; stateT = 0; }
+            else Settings.PauseAction(pick);
+        }
+        if (Input.Pause) state = Playing;
+        if (Input.Quit) return false;
+        Settings.RefreshPauseLabels(pauseMenu);
+    }
+    else if (state == Playing)
     {
         if (Input.Quit) return false;
+        if (Input.Pause) { state = Paused; pauseMenu.Index = 0; stateT = 0; }
+        if (Input.Hit(ConsoleKey.B)) DropBomb();
         elapsed += dt;
         fireCd -= dt;
 
@@ -269,21 +328,29 @@ GameLoop.Run((dt, t) =>
     }
     else
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.R)) { Start(); state = 1; }
-        if (Input.Hit(ConsoleKey.Escape)) { state = 0; stateT = 0; }
+        var pick = deadMenu.Update();
+        if (pick == 0 || Input.Hit(ConsoleKey.R)) { Start(); state = Playing; }
+        else if (pick == 1) { state = Title; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
 
     fx.Update(dt);
+    toasts.Update(dt);
 
     cv.Clear();
     cv.ShakeX = shake > 0.3 ? rng.Next(-(int)shake, (int)shake + 1) : 0;
     cv.ShakeY = shake > 0.3 ? rng.Next(-(int)shake, (int)shake + 1) : 0;
     DrawBackdrop();
 
-    if (state == 0)
+    if (state == Title)
     {
         DrawTitle();
+        fx.Draw(cv);
+    }
+    else if (state == Help)
+    {
+        DrawHelp();
         fx.Draw(cv);
     }
     else
@@ -292,18 +359,16 @@ GameLoop.Run((dt, t) =>
         fx.Draw(cv);
         DrawPops();
         DrawHud();
-        if (state == 2) DrawDead();
+        if (state == Dead) DrawDead();
+        if (state == Paused) DrawPause();
     }
+
+    toasts.Draw(cv, 1);
 
     if (flash > 0.01)
     {
         cv.OverlayColor = flashCol;
         cv.OverlayK = Math.Min(0.55, flash);
-    }
-    else if (state == 2)
-    {
-        cv.OverlayColor = 0x000000;
-        cv.OverlayK = 0.35;
     }
     else cv.OverlayK = 0;
 
@@ -374,10 +439,10 @@ void DrawField()
         cv.Set(px, H - 4, '╨', 0x3a5a2a);
     }
 
-    if (waveT > 0 && state == 1)
+    if (waveT > 0 && state == Playing)
     {
         var k = Math.Min(1.0, waveT / 0.6);
-        cv.TextC(waveText, Col.Scale(0x9be564, k), H / 2 - 1);
+        Ui.Badge(cv, (W - waveText.Length - 2) / 2, H / 2 - 1, waveText, Col.Scale(0x9be564, k), 0x0c160c);
     }
 }
 
@@ -389,12 +454,11 @@ void DrawHud()
         lives <= 1 ? 0xff5c7a : 0xff9fc4);
     cv.Text(2, 1, $"wave {wave}   blaster lv {weapon}   cells {cellCount}", 0x6a8a5a);
     cv.TextRight($"best {best:000000}", W - 3, 1, 0x3e5a38);
+    if (bombs > 0) cv.Text(2, 2, $"clout {new string('◆', Math.Min(5, bombs))}", 0x7ff5e3);
 
-    var ticker = "  ✖ skibidi  ·  sigma  ·  rizz  ·  ohio  ·  gyatt  ·  fanum tax  ·  mewing  ·  looksmaxxing  ·  delulu  ·  brainrot  ";
-    var offset = (int)(fx.Time * 8) % ticker.Length;
-    var view = ticker.Substring(offset) + ticker.Substring(0, offset);
-    cv.TextC(view.Substring(0, Math.Min(W - 2, view.Length)), 0x2f4a2a, H - 2);
-    cv.TextC("a / d  move     hold space  shoot     q quit", 0x4a6a42, H - 1);
+    Ui.Ticker(cv, H - 2, "skibidi  ·  sigma  ·  rizz  ·  ohio  ·  gyatt  ·  fanum tax  ·  mewing  ·  looksmaxxing  ·  delulu  ·  brainrot",
+        fx.Time, 0x2f4a2a, 0x22402a, 8);
+    Ui.Hints(cv, H - 1, "A/D", "move", "SPACE", "shoot", "B", "bomb", "P", "pause");
 }
 
 void DrawPops()
@@ -409,38 +473,67 @@ void DrawPops()
 void DrawTitle()
 {
     var t = fx.Time;
-    var title = "b r a i n r o t   b l a s t e r";
-    var x = (W - title.Length) / 2;
-    var glitch = (int)(t * 6) % 7 == 0 ? 1 : 0;
-    cv.TextGrad(x, 7, title, 0x9be564, 0xff4fa3, (t * 0.16) % 1);
-    if (glitch == 1)
-    {
-        cv.TextGrad(x + 1, 8, title, 0xff4fa3, 0x9be564, (t * 0.16 + 0.3) % 1);
-        cv.TextC("do not adjust your screen", 0xff5c7a, 9);
-    }
-    cv.TextC("shoot the brainrot before it shoots you", 0xd8ffe8, 11);
-    cv.TextC("collect brain cells. upgrade the blaster. log off.", 0x6a8a6a, 12);
-    if (best > 0) cv.TextC($"best {best:000000}", 0xffd166, 15);
-    if (t % 1.15 < 0.75) cv.TextC("PRESS SPACE TO LOCK IN", 0xffffff, 18);
-    cv.TextC("a / d  move      hold space  shoot      q  quit", 0x6a8a6a, 21);
-    cv.TextC("your attention span is the final boss.", 0x3e5a38, 23);
+    var top = Math.Max(2, (H - 15) / 2);
+    var glitch = (int)(t * 6) % 7 == 0;
+    if (glitch) cv.Fill(1, top, W - 2, top + 1, ' ', 0x14300f);
+    Ui.BigTitle(cv, top, "brainrot blaster", 0x9be564, 0xff4fa3, t);
+    if (glitch) cv.TextC("do not adjust your screen", 0xff5c7a, top + 2);
+    Ui.TextShadowC(cv, top + 3, "shoot the brainrot before it shoots you", 0xd8ffe8);
+    cv.TextC("collect brain cells. upgrade the blaster. log off.", 0x6a8a6a, top + 4);
+
+    titleMenu.Draw(cv, top + 6);
+
+    if (best > 0) Ui.Badge(cv, (W - 13) / 2, top + 10, $"best {best:000000}", 0xffd166, 0x241a08);
+
+    Ui.Ticker(cv, H - 3, "your attention span is the final boss  ·  lock in  ·  clout bomb ready  ·  log off eventually",
+        t, 0x6a8a6a, 0x3e5a38, 6);
+    Ui.Hints(cv, H - 1, "W/S", "select", "ENTER", "pick", "Q", "quit");
+}
+
+void DrawHelp()
+{
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(58, W - 2), Math.Min(18, H - 2), "how to play", 0x9be564);
+    var x = x0 + 3;
+    var y = y0 + 2;
+    y += Ui.WrapDraw(cv, x, y,
+        "brainrot falls from the top of the feed. shoot it before it reaches you. brain cells upgrade the blaster.",
+        x1 - x - 2, Ui.Ink, 3) + 1;
+    Ui.KeyHint(cv, x, y, "A/D", "move", 0x9be564); y++;
+    Ui.KeyHint(cv, x, y, "SPACE", "hold to keep shooting", 0xb6ff6a); y++;
+    Ui.KeyHint(cv, x, y, "B", "drop a clout bomb and clear the screen", Ui.Accent2); y++;
+    Ui.KeyHint(cv, x, y, "P", "pause + settings", Ui.Gold); y += 2;
+    cv.Text(x, y, "every 25 kills earns another bomb.", Ui.InkDim); y++;
+    cv.Text(x, y, "6 brain cells upgrades the blaster.", Ui.InkDim);
+    cv.TextC("enter / esc to go back", Ui.InkFaint, y1 - 1);
+}
+
+void DrawPause()
+{
+    cv.Dim(0.45);
+    Settings.RefreshPauseLabels(pauseMenu);
+    var (_, y0, _, y1) = Ui.CenterCard(cv, 38, 11, "paused", Ui.Accent);
+    pauseMenu.Draw(cv, y0 + 2);
+    cv.TextC("P / ESC to resume", Ui.InkFaint, y1 - 1);
 }
 
 void DrawDead()
 {
-    var panelW = Math.Min(58, W - 4);
-    var x0 = (W - panelW) / 2;
-    var x1 = x0 + panelW - 1;
-    var y0 = H / 2 - 6;
-    var y1 = y0 + 11;
-    cv.Fill(x0, y0, x1, y1, ' ', 0x08110a);
-    cv.Frame(x0, y0, x1, y1, 0x9be564);
-    cv.TextC("brain fully rotted.", 0xff5c7a, y0 + 2);
-    cv.TextC("you became the content.", 0x6a8a6a, y0 + 3);
-    cv.TextC($"score {score:000000}    wave {wave}    cells {cellCount}", 0xf4ffe8, y0 + 5);
-    cv.TextC($"survived {gone}s    best {best:000000}", newRecord ? 0xffd166 : 0x6a8a6a, y0 + 6);
-    cv.TextC(newRecord ? "new personal best (concerning)" : "the feed always wins", 0x9be564, y0 + 8);
-    if (fx.Time % 1.1 < 0.75) cv.TextC("SPACE again    ESC title    Q quit", 0xd8ffe8, y0 + 10);
+    cv.Dim(0.4);
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(56, W - 2), Math.Min(18, H - 2), "brain fully rotted", 0x9be564);
+    var cx = (x0 + x1) / 2;
+    cv.TextC("you became the content.", 0x6a8a6a, y0 + 2);
+
+    var (rank, tier) = Ui.Rank(score, new[] { 300, 800, 1500, 2600, 4000, 6000 });
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 4, "score", $"{score:000000}", 0xf4ffe8);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 5, "wave", wave.ToString(), 0xb6ff6a);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 6, "cells / kills", $"{cellCount} / {kills}", 0x7ff5e3);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 7, "rank", rank, Ui.RankColor(tier));
+    Ui.Divider(cv, x0 + 2, x1 - 2, y0 + 9);
+    if (newRecord) Ui.NewBest(cv, cx, y0 + 10, fx.Time);
+    else Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 10, $"best / survived {gone}s", $"{best:000000}", 0xffd166);
+
+    deadMenu.Draw(cv, y0 + 12);
+    cv.TextC("R to go again", Ui.InkFaint, y1 - 1);
 }
 
 sealed class Bullet
