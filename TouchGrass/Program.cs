@@ -10,12 +10,23 @@ if (W == 0)
 }
 
 var cv = new Canvas(W, H);
+Settings.Apply(cv);
 var fx = new Fx();
 var rng = new Random();
 var best = Store.Best("touchgrass");
 var items = new List<Item>();
 var pops = new List<Pop>();
-var state = 0;
+const int Title = 0;
+const int Playing = 1;
+const int Dead = 2;
+const int Paused = 3;
+const int Help = 4;
+var state = Title;
+var titleMenu = new Menu("go outside", "how to play", "quit");
+var deadMenu = new Menu("another walk", "title screen", "quit");
+var pauseMenu = Settings.PauseMenu();
+var toasts = new Toasts();
+var lastLevel = 0;
 var score = 0;
 var wellness = 100.0;
 var elapsed = 0.0;
@@ -27,6 +38,7 @@ var flash = 0.0;
 var newRecord = false;
 var stateT = 0.0;
 var moveTrail = 0.0;
+var stillT = 0.0;
 
 var levelNames = new[] { "sunday reset", "hot girl walk", "picnic core", "touch grass", "main character" };
 var footerLines = new[]
@@ -52,6 +64,8 @@ void Start()
     flash = 0;
     newRecord = false;
     stateT = 0;
+    stillT = 0;
+    lastLevel = 0;
 }
 
 void Spawn()
@@ -154,17 +168,39 @@ GameLoop.Run((dt, t) =>
     if (flash > 0) flash = Math.Max(0, flash - dt * 2.5);
     stateT += dt;
 
-    if (state == 0)
+    if (state == Title)
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.Enter)) { Start(); state = 1; }
+        var pick = titleMenu.Update();
+        if (pick == 0) { Start(); state = Playing; }
+        else if (pick == 1) { state = Help; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
         if (rng.NextDouble() < 0.12)
             fx.Spawn(rng.Next(W), 0, (rng.NextDouble() - 0.5) * 2, 1.2 + rng.NextDouble() * 2.0,
                 7, 0xe58fa3, 0xf7c6d0, '❀', 0.2, 0.05);
     }
-    else if (state == 1)
+    else if (state == Help)
+    {
+        if (Input.Confirm || Input.Back || Input.Quit) { state = Title; stateT = 0; }
+    }
+    else if (state == Paused)
+    {
+        var pick = pauseMenu.Update();
+        if (pick >= 0)
+        {
+            if (pick == 0) state = Playing;
+            else if (pick == 1) { Start(); state = Playing; }
+            else if (pick == 5) { state = Title; stateT = 0; }
+            else Settings.PauseAction(pick);
+        }
+        if (Input.Pause) state = Playing;
+        if (Input.Quit) return false;
+        Settings.RefreshPauseLabels(pauseMenu);
+    }
+    else if (state == Playing)
     {
         if (Input.Quit) return false;
+        if (Input.Pause) { state = Paused; pauseMenu.Index = 0; stateT = 0; }
         var move = 0.0;
         if (Input.HeldAny(ConsoleKey.A, ConsoleKey.LeftArrow)) move -= 1;
         if (Input.HeldAny(ConsoleKey.D, ConsoleKey.RightArrow)) move += 1;
@@ -180,8 +216,27 @@ GameLoop.Run((dt, t) =>
             }
         }
 
+        // standing still is the whole point: it slowly restores wellness
+        if (move == 0)
+        {
+            stillT += dt;
+            if (stillT > 1.2)
+            {
+                wellness = Math.Min(100, wellness + 2.0 * dt);
+                if (rng.NextDouble() < 0.05)
+                    fx.Spawn(playerX + rng.Next(-2, 3), H - 7, 0, -0.8, 1.3, 0xd8e2c8, 0xf0a0b4, '♡', 0, 1);
+            }
+        }
+        else stillT = 0;
+
         elapsed += dt;
         level = Math.Min(4, (int)(elapsed / 18));
+        if (level != lastLevel)
+        {
+            lastLevel = level;
+            toasts.Push(levelNames[level], 0xa8c895);
+            fx.Ring(playerX, H - 7, 20, 14, 0.6, 0xd8e2c8, 0xa8c895, '❀');
+        }
         wellness -= (1.25 + level * 0.38) * dt;
 
         spawnAcc += dt;
@@ -214,12 +269,15 @@ GameLoop.Run((dt, t) =>
     }
     else
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.R)) { Start(); state = 1; }
-        if (Input.Hit(ConsoleKey.Escape)) { state = 0; stateT = 0; }
+        var pick = deadMenu.Update();
+        if (pick == 0 || Input.Hit(ConsoleKey.R)) { Start(); state = Playing; }
+        else if (pick == 1) { state = Title; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
 
     fx.Update(dt);
+    toasts.Update(dt);
     for (var i = pops.Count - 1; i >= 0; i--)
     {
         var p = pops[i];
@@ -234,16 +292,19 @@ GameLoop.Run((dt, t) =>
     DrawSky();
     DrawSun();
     DrawHills();
-    if (state is 1 or 2)
+    if (state is Playing or Dead or Paused)
     {
         foreach (var it in items) DrawItem(it);
         DrawPlayer();
     }
     fx.Draw(cv);
     DrawPops();
-    if (state is 1 or 2) DrawHud();
-    if (state == 0) DrawTitle();
-    if (state == 2) DrawDead();
+    if (state is Playing or Dead or Paused) DrawHud();
+    if (state == Title) DrawTitle();
+    if (state == Help) DrawHelp();
+    if (state == Dead) DrawDead();
+    if (state == Paused) DrawPause();
+    toasts.Draw(cv, 1);
 
     if (flash > 0.01)
     {
@@ -361,12 +422,9 @@ void DrawHud()
     var wc = wp > 0.55 ? 0x8fbf6f : wp > 0.25 ? 0xe0b84e : 0xe06a7a;
     Ui.Bar(cv, 11, 2, 20, wp, wc, Col.Mix(wc, 0xffffff, 0.4));
     cv.Text(33, 2, $"{(int)wellness}%", 0x9ab088);
+    if (stillT > 1.2) cv.Text(41, 2, "breathing +", 0xa8c895);
     cv.TextC(footerLines[level], 0x5b6f52, H - 1);
-    if (state == 1)
-    {
-        cv.Text(2, H - 2, "a / d  move", 0x63795a);
-        cv.TextRight("q quit", W - 3, H - 2, 0x63795a);
-    }
+    Ui.Hints(cv, H - 2, "A/D", "move", "P", "pause");
 }
 
 void DrawPops()
@@ -381,32 +439,69 @@ void DrawPops()
 void DrawTitle()
 {
     var t = fx.Time;
-    var title = "t o u c h   g r a s s";
-    var x = (W - title.Length) / 2;
-    cv.TextGrad(x, 8, title, 0xa8c895, 0xf0a0b4, (t * 0.1) % 1);
-    cv.TextGrad(x, 9, "──────────────────────", 0xa8c895, 0xf0a0b4, (t * 0.1) % 1);
-    cv.TextC("a cozy little game about logging off", 0xd8e2c8, 12);
-    cv.TextC("catch the soft stuff. dodge the doom.", 0x8aa17a, 13);
-    if (best > 0) cv.TextC($"best vibes {best:000000}", 0xe0c884, 16);
-    if (t % 1.4 < 0.85) cv.TextC("PRESS SPACE TO GO OUTSIDE", 0xf6efe0, 19);
-    cv.TextC("a / d  or  ← →  move", 0x8aa17a, 21);
-    cv.TextC("q quits. grass is patient.", 0x5b6f52, 22);
+    var top = Math.Max(2, (H - 14) / 2);
+    Ui.BigTitle(cv, top, "touch grass", 0xa8c895, 0xf0a0b4, t);
+    Ui.TextShadowC(cv, top + 2, "a cozy little game about logging off", 0xd8e2c8);
+    cv.TextC("catch the soft stuff. dodge the doom.", 0x8aa17a, top + 3);
+
+    titleMenu.Draw(cv, top + 5);
+
+    if (best > 0)
+    {
+        var label = $"best vibes {best:000000}";
+        Ui.Badge(cv, (W - label.Length - 2) / 2, top + 9, label, 0xe0c884, 0x25200c);
+    }
+
+    Ui.Ticker(cv, H - 3, "no thoughts just petals  ·  go outside  ·  the feed will survive without you  ·  breathe",
+        t, 0x8aa17a, 0x5b6f52, 5);
+    Ui.Hints(cv, H - 1, "W/S", "select", "ENTER", "pick", "Q", "quit");
+}
+
+void DrawHelp()
+{
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(56, W - 2), Math.Min(18, H - 2), "how to play", 0xa8c895);
+    var x = x0 + 3;
+    var y = y0 + 2;
+    y += Ui.WrapDraw(cv, x, y,
+        "catch what feels good, dodge what drains you. wellness falls slowly on its own, and much faster once the walk gets busy.",
+        x1 - x - 2, Ui.Ink, 3) + 1;
+    cv.Set(x, y, '❀', 0xf0a0b4); cv.Text(x + 2, y, "petals +12 vibes", Ui.InkDim); y++;
+    cv.Set(x, y, '☀', 0xf2c14e); cv.Text(x + 2, y, "sunshine +30", Ui.InkDim); y++;
+    cv.Set(x, y, '♡', 0xe58fa3); cv.Text(x + 2, y, "self care +18 wellness", Ui.InkDim); y++;
+    cv.Set(x, y, '✧', 0xb9a7ff); cv.Text(x + 2, y, "whimsy +45", Ui.InkDim); y++;
+    cv.Set(x, y, '☁', 0x8a93a0); cv.Text(x + 2, y, "doom cloud -18 wellness", Ui.InkDim); y++;
+    cv.Set(x, y, '!', 0xff5c7a); cv.Text(x + 2, y, "notification anxiety -12 and -15 vibes", Ui.InkDim); y += 2;
+    cv.Text(x, y, "stand still to breathe and recover.", Ui.Accent2);
+    cv.TextC("enter / esc to go back", Ui.InkFaint, y1 - 1);
+}
+
+void DrawPause()
+{
+    cv.Dim(0.45);
+    Settings.RefreshPauseLabels(pauseMenu);
+    var (_, y0, _, y1) = Ui.CenterCard(cv, 38, 11, "paused", Ui.Accent);
+    pauseMenu.Draw(cv, y0 + 2);
+    cv.TextC("P / ESC to resume", Ui.InkFaint, y1 - 1);
 }
 
 void DrawDead()
 {
-    var panelW = Math.Min(50, W - 4);
-    var x0 = (W - panelW) / 2;
-    var x1 = x0 + panelW - 1;
-    var y0 = H / 2 - 6;
-    var y1 = y0 + 11;
-    cv.Fill(x0, y0, x1, y1, ' ', 0x101a10);
-    cv.Frame(x0, y0, x1, y1, 0x6f8a63);
-    cv.TextC("you went outside.", 0xd8e2c8, y0 + 2);
-    cv.TextC($"vibes {score:000000}", 0xf6efe0, y0 + 4);
-    cv.TextC($"survived {elapsed:0.0}s", 0x8aa17a, y0 + 5);
-    cv.TextC(newRecord ? "new soft-life record" : $"best vibes {best:000000}", newRecord ? 0xe0c884 : 0x6f8a63, y0 + 7);
-    if (fx.Time % 1.2 < 0.8) cv.TextC("SPACE again    ESC title    Q quit", 0xcfe0b8, y0 + 9);
+    cv.Dim(0.4);
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(52, W - 2), Math.Min(18, H - 2), "you went outside", 0x8fbf6f);
+    var cx = (x0 + x1) / 2;
+    cv.TextC("wellness hit zero. it happens.", 0x8aa17a, y0 + 2);
+
+    var (rank, tier) = Ui.Rank(score, new[] { 150, 350, 600, 900, 1300, 1800 });
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 4, "vibes", $"{score:000000}", 0xf6efe0);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 5, "survived", $"{elapsed:0.0}s", 0x8aa17a);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 6, "made it to", levelNames[level], 0xa8c895);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 7, "rank", rank, Ui.RankColor(tier));
+    Ui.Divider(cv, x0 + 2, x1 - 2, y0 + 9);
+    if (newRecord) Ui.NewBest(cv, cx, y0 + 10, fx.Time);
+    else Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 10, "best vibes", $"{best:000000}", 0xe0c884);
+
+    deadMenu.Draw(cv, y0 + 12);
+    cv.TextC("R to walk again", Ui.InkFaint, y1 - 1);
 }
 
 sealed class Item
