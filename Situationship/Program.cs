@@ -10,11 +10,21 @@ if (W == 0)
 }
 
 var cv = new Canvas(W, H);
+Settings.Apply(cv);
 var fx = new Fx();
 var rng = new Random();
 var best = Store.Best("situationship");
 var messages = new List<Msg>();
-var state = 0;          // 0 title, 1 chat, 2 ending
+const int Title = 0;
+const int Chat = 1;
+const int Ending = 2;
+const int Paused = 3;
+const int Help = 4;
+var state = Title;
+var titleMenu = new Menu("catch feelings", "how to play", "quit");
+var endMenu = new Menu("text again", "title screen", "quit");
+var pauseMenu = Settings.PauseMenu();
+var toasts = new Toasts();
 var phase = 0;          // 0 typing incoming, 1 choice, 2 typing reply, 3 ended
 var round = 0;
 var typed = 0.0;
@@ -82,6 +92,8 @@ void Finish()
     stateT = 0;
     (endingTitle, endingBody) = ComputeEnding();
     points = peace * 120 + heart * 40 + rizz * 90;
+    if (peace >= 12 || heart >= 12 || rizz >= 12)
+        toasts.Push("you maxed a stat. that's growth.", 0xff8fc8);
     if (points > best)
     {
         best = points;
@@ -93,6 +105,9 @@ void Finish()
 
 (string, string) ComputeEnding()
 {
+    if (peace >= 7 && heart >= 7 && rizz >= 5)
+        return ("secure attachment. frame it.",
+            "you like them, you like yourself, and you said so out loud. the group chat has never been quieter or more impressed.");
     if (peace >= 9 && peace >= heart + 2)
         return ("you chose peace.",
             "you logged off, drank water, and did not text back. the group chat is stunned. your skin is glowing.");
@@ -115,14 +130,36 @@ GameLoop.Run((dt, t) =>
         fx.Spawn(rng.Next(W), H, (rng.NextDouble() - 0.5) * 1.5, -1.2 - rng.NextDouble() * 2,
             5, 0xff8fc8, 0x3a1428, rng.Next(3) == 0 ? '♡' : '·', 0, 0.05);
 
-    if (state == 0)
+    if (state == Title)
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.Enter)) { Start(); state = 1; }
+        var pick = titleMenu.Update();
+        if (pick == 0) { Start(); state = Chat; }
+        else if (pick == 1) { state = Help; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
-    else if (state == 1)
+    else if (state == Help)
+    {
+        if (Input.Confirm || Input.Back || Input.Quit) { state = Title; stateT = 0; }
+    }
+    else if (state == Paused)
+    {
+        var pick = pauseMenu.Update();
+        if (pick >= 0)
+        {
+            if (pick == 0) state = Chat;
+            else if (pick == 1) { Start(); state = Chat; }
+            else if (pick == 5) { state = Title; stateT = 0; }
+            else Settings.PauseAction(pick);
+        }
+        if (Input.Pause) state = Chat;
+        if (Input.Quit) return false;
+        Settings.RefreshPauseLabels(pauseMenu);
+    }
+    else if (state == Chat)
     {
         if (Input.Quit) return false;
+        if (Input.Pause) { state = Paused; pauseMenu.Index = 0; stateT = 0; }
         if (phase is 0 or 2)
         {
             if (Input.Hit(ConsoleKey.Spacebar)) typed = 9999;
@@ -144,18 +181,26 @@ GameLoop.Run((dt, t) =>
     }
     else
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.R)) { Start(); state = 1; }
-        if (Input.Hit(ConsoleKey.Escape)) { state = 0; stateT = 0; }
+        var pick = endMenu.Update();
+        if (pick == 0 || Input.Hit(ConsoleKey.R)) { Start(); state = Chat; }
+        else if (pick == 1) { state = Title; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
 
     fx.Update(dt);
+    toasts.Update(dt);
 
     cv.Clear();
     DrawBackdrop();
-    if (state == 0)
+    if (state == Title)
     {
         DrawTitle();
+        fx.Draw(cv);
+    }
+    else if (state == Help)
+    {
+        DrawHelp();
         fx.Draw(cv);
     }
     else
@@ -163,8 +208,11 @@ GameLoop.Run((dt, t) =>
         DrawTopBar();
         DrawPhone();
         fx.Draw(cv);
-        if (state == 2) DrawEnding();
+        if (state == Ending) DrawEnding();
+        if (state == Paused) DrawPause();
     }
+
+    toasts.Draw(cv, 1);
 
     if (flash > 0.01)
     {
@@ -247,7 +295,7 @@ void DrawPhone()
     }
 
     cv.Text(x0 + 2, y1 - 1, "1-3 choose", 0x5a4a6a);
-    cv.TextRight("q quit", x1 - 2, y1 - 1, 0x5a4a6a);
+    cv.TextRight("P pause", x1 - 2, y1 - 1, 0x5a4a6a);
 }
 
 void DrawChat(int x0, int x1, int top, int bottom)
@@ -289,41 +337,70 @@ void DrawChat(int x0, int x1, int top, int bottom)
 void DrawTitle()
 {
     var t = fx.Time;
-    var title = "s i t u a t i o n s h i p";
-    var x = (W - title.Length) / 2;
-    cv.TextGrad(x, 6, title, 0xff4fa3, 0x7ff5e3, (t * 0.14) % 1);
-    cv.TextGrad(x, 7, "───────────────────────", 0xff4fa3, 0xb9a7ff, (t * 0.14) % 1);
-    cv.TextC("a texting simulator with consequences", 0xe0d8f0, 10);
-    cv.TextC("you cannot unsend. you can, however, grow.", 0x8a7aa8, 11);
+    var top = Math.Max(2, (H - 16) / 2);
+    Ui.BigTitle(cv, top, "situationship", 0xff4fa3, 0x7ff5e3, t);
+    Ui.TextShadowC(cv, top + 2, "a texting simulator with consequences", 0xe0d8f0);
+    cv.TextC("you cannot unsend. you can, however, grow.", 0x8a7aa8, top + 3);
 
-    cv.TextC("them  ·  are we hanging out this week", 0xb9a7ff, 14);
-    cv.TextC("you   ·  define \"hanging out\"", 0x9fd8ff, 15);
-    cv.TextC("them  ·  you're so weird", 0xb9a7ff, 16);
+    titleMenu.Draw(cv, top + 5);
 
-    if (best > 0) cv.TextC($"best {best} main character points", 0xffd166, 18);
-    if (t % 1.2 < 0.75) cv.TextC("PRESS SPACE TO CATCH FEELINGS", 0xffffff, 20);
-    cv.TextC("1-3 choose a reply      q quit", 0x6a5a7a, 21);
+    cv.TextC("them  ·  are we hanging out this week", 0xb9a7ff, top + 10);
+    cv.TextC("you   ·  define \"hanging out\"", 0x9fd8ff, top + 11);
+    cv.TextC("them  ·  you're so weird", 0xb9a7ff, top + 12);
+
+    if (best > 0) Ui.Badge(cv, (W - 20) / 2, top + 14, $"best {best} pts", 0xffd166, 0x241a08);
+
+    Ui.Ticker(cv, H - 3, "read at 2:14am  ·  typing…  ·  no label no problem  ·  the group chat is invested",
+        t, 0x8a7aa8, 0x5a4a6a, 6);
+    Ui.Hints(cv, H - 1, "W/S", "select", "ENTER", "pick", "Q", "quit");
+}
+
+void DrawHelp()
+{
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(60, W - 2), Math.Min(19, H - 2), "how to play", 0xff8fc8);
+    var x = x0 + 3;
+    var y = y0 + 2;
+    y += Ui.WrapDraw(cv, x, y,
+        "eleven texts, three replies each, one ending you have to live with. every reply nudges three stats.",
+        x1 - x - 2, Ui.Ink, 3) + 1;
+    cv.Text(x, y, "peace", 0x7ff5e3); cv.Text(x + 8, y, "boundaries. calm. logging off.", Ui.InkDim); y++;
+    cv.Text(x, y, "heart", 0xff8fc8); cv.Text(x + 8, y, "warmth. honesty. actually saying it.", Ui.InkDim); y++;
+    cv.Text(x, y, "rizz", 0xb9a7ff); cv.Text(x + 8, y, "chaos. charm. unbothered energy.", Ui.InkDim); y += 2;
+    Ui.KeyHint(cv, x, y, "1-3", "choose a reply (or a-c)", 0xb9a7ff); y++;
+    Ui.KeyHint(cv, x, y, "SPACE", "skip the typing animation", Ui.Accent2); y += 2;
+    cv.Text(x, y, "ending is decided by whichever stat you fed.", Ui.InkDim);
+    cv.TextC("enter / esc to go back", Ui.InkFaint, y1 - 1);
+}
+
+void DrawPause()
+{
+    cv.Dim(0.45);
+    Settings.RefreshPauseLabels(pauseMenu);
+    var (_, y0, _, y1) = Ui.CenterCard(cv, 38, 11, "paused", Ui.Accent);
+    pauseMenu.Draw(cv, y0 + 2);
+    cv.TextC("P / ESC to resume", Ui.InkFaint, y1 - 1);
 }
 
 void DrawEnding()
 {
-    var panelW = Math.Min(62, W - 4);
-    var x0 = (W - panelW) / 2;
-    var x1 = x0 + panelW - 1;
-    var y0 = Math.Max(3, H / 2 - 8);
-    var y1 = Math.Min(H - 2, y0 + 13);
-    cv.Fill(x0, y0, x1, y1, ' ', 0x0d0814);
-    cv.Frame(x0, y0, x1, y1, 0xff8fc8);
-
-    cv.TextGrad(x0 + 3, y0 + 2, endingTitle, 0xff8fc8, 0x7ff5e3, (fx.Time * 0.1) % 1);
-    var body = Ui.Wrap(endingBody, panelW - 6);
+    cv.Dim(0.3);
+    var w = Math.Min(62, W - 2);
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, w, Math.Min(18, H - 2), "ending", 0xff8fc8);
+    cv.TextGrad(x0 + 3, y0 + 2, Trunc(endingTitle, w - 8), 0xff8fc8, 0x7ff5e3, (fx.Time * 0.1) % 1);
+    var body = Ui.Wrap(endingBody, w - 6);
     for (var i = 0; i < body.Length && i < 3; i++)
         cv.Text(x0 + 3, y0 + 4 + i, body[i], 0xd8cfe8);
 
-    cv.TextC($"peace {peace}   heart {heart}   rizz {rizz}", 0xb9a7ff, y0 + 8);
-    cv.TextC($"{points} main character points    best {best}", newRecord ? 0xffd166 : 0x8a7aa8, y0 + 9);
-    if (newRecord) cv.TextC("new personal best (healing arc)", 0xffd166, y0 + 10);
-    if (fx.Time % 1.15 < 0.8) cv.TextC("SPACE text again    ESC title    Q quit", 0xe8e0f4, y0 + 12);
+    var (rank, tier) = Ui.Rank(points, new[] { 200, 400, 700, 1100, 1600, 2200 });
+    Ui.Divider(cv, x0 + 2, x1 - 2, y0 + 7);
+    cv.Text(x0 + 3, y0 + 8, $"peace {peace}   heart {heart}   rizz {rizz}", 0xb9a7ff);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 9, "main character points", points.ToString(), 0xf0e8ff);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 10, "rank", rank, Ui.RankColor(tier));
+    if (newRecord) Ui.NewBest(cv, (x0 + x1) / 2, y0 + 12, fx.Time);
+    else Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 12, "best", best.ToString(), 0xffd166);
+
+    endMenu.Draw(cv, y0 + 13);
+    cv.TextC("R to text again", Ui.InkFaint, y1 - 1);
 }
 
 string Trunc(string s, int n) => s.Length <= n ? s : s[..Math.Max(0, n - 1)] + "…";
@@ -397,6 +474,21 @@ static class Content
         new("ok real talk. i like you. but i'm not ready for a relationship.",
             new Opt("then i'm not waiting around. take care.", "i understand. i'm sorry.", 3, 0, 0),
             new Opt("i can be patient.", "you deserve better than patient", -2, 3, 0),
-            new Opt("same. let's just see what happens.", "see? this is why i like you", 0, 1, 1))
+            new Opt("same. let's just see what happens.", "see? this is why i like you", 0, 1, 1)),
+
+        new("ok so. i might have told my mom about you.",
+            new Opt("what exactly did you say?", "that you're funny. and that i'm cooked.", 1, 2, 0),
+            new Opt("that's a lot for a tuesday.", "fair. i'll walk it back.", 2, -1, 1),
+            new Opt("tell her i said hi, future mother-in-law.", "oh my god we are not there yet", 0, 0, 3)),
+
+        new("are you free on saturday? like actually free.",
+            new Opt("yes. i'm putting it in my calendar right now.", "wow. an actual plan. i'm swooning", 3, 1, 0),
+            new Opt("probably. depends what we're doing.", "i'll plan something. promise.", 2, 0, 0),
+            new Opt("i'm booked but i could be convinced.", "consider yourself convinced", 0, 0, 2)),
+
+        new("i'm sorry i was weird last week. i do that.",
+            new Opt("thank you for saying that. it helped.", "ok now i'm emotional at work", 2, 3, 0),
+            new Opt("yeah you did. but we're good.", "noted. i'll do better.", 3, 1, 0),
+            new Opt("weird is your whole thing. don't change.", "this is why i like texting you", 0, 1, 2))
     };
 }
