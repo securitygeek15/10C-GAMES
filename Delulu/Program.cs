@@ -10,12 +10,24 @@ if (W == 0)
 }
 
 var cv = new Canvas(W, H);
+Settings.Apply(cv);
 var fx = new Fx();
 var rng = new Random();
 var best = Store.Best("delulu");
 var pops = new List<Pop>();
 var options = new List<Option>();
-var state = 0;
+const int Title = 0;
+const int Playing = 1;
+const int Dead = 2;
+const int Paused = 3;
+const int Help = 4;
+var state = Title;
+var titleMenu = new Menu("catch feelings", "how to play", "quit");
+var deadMenu = new Menu("run it back", "title screen", "quit");
+var pauseMenu = Settings.PauseMenu();
+var toasts = new Toasts();
+var hintUsed = false;
+var hidden = -1;
 var score = 0;
 var hearts = 3;
 var round = 0;
@@ -59,6 +71,8 @@ void NextRound()
     revealT = 0;
     chosenIdx = -2;
     verdict = "";
+    hintUsed = false;
+    hidden = -1;
     options.Clear();
 
     var d = rng.Next(Content.Delulu.Length);
@@ -82,9 +96,24 @@ void NextRound()
     correctIdx = options.FindIndex(o => o.Delulu);
 }
 
+void UseHint()
+{
+    if (hintUsed || revealT > 0) return;
+    var candidates = new List<int>();
+    for (var i = 0; i < options.Count; i++)
+        if (i != correctIdx) candidates.Add(i);
+    if (candidates.Count == 0) return;
+    hidden = candidates[rng.Next(candidates.Count)];
+    hintUsed = true;
+    score = Math.Max(0, score - 100);
+    verdict = "the group chat weighed in.";
+    toasts.Push("one cope crossed out, -100", 0xb9a7ff);
+    fx.Spark(W / 2.0, 4, 0xb9a7ff, 14);
+}
+
 void Choose(int idx)
 {
-    if (revealT > 0) return;
+    if (revealT > 0 || idx == hidden) return;
     chosenIdx = idx;
     revealT = 1.35;
     if (idx == correctIdx)
@@ -136,17 +165,40 @@ GameLoop.Run((dt, t) =>
     if (flash > 0) flash = Math.Max(0, flash - dt * 2.6);
     stateT += dt;
 
-    if (state == 0)
+    if (state == Title)
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.Enter)) { Start(); state = 1; }
+        var pick = titleMenu.Update();
+        if (pick == 0) { Start(); state = Playing; }
+        else if (pick == 1) { state = Help; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
         if (rng.NextDouble() < 0.18)
             fx.Spawn(rng.Next(W), H, (rng.NextDouble() - 0.5) * 1.5, -1.5 - rng.NextDouble() * 2.5,
                 4.5, 0xff4fa3, 0x4a1a34, rng.Next(3) == 0 ? '♡' : '?', 0, 0.08);
     }
-    else if (state == 1)
+    else if (state == Help)
+    {
+        if (Input.Confirm || Input.Back || Input.Quit) { state = Title; stateT = 0; }
+    }
+    else if (state == Paused)
+    {
+        var pick = pauseMenu.Update();
+        if (pick >= 0)
+        {
+            if (pick == 0) state = Playing;
+            else if (pick == 1) { Start(); state = Playing; }
+            else if (pick == 5) { state = Title; stateT = 0; }
+            else Settings.PauseAction(pick);
+        }
+        if (Input.Pause) state = Playing;
+        if (Input.Quit) return false;
+        Settings.RefreshPauseLabels(pauseMenu);
+    }
+    else if (state == Playing)
     {
         if (Input.Quit) return false;
+        if (Input.Pause) { state = Paused; pauseMenu.Index = 0; stateT = 0; }
+        if (Input.Hit(ConsoleKey.H)) UseHint();
         if (revealT > 0)
         {
             revealT -= dt;
@@ -168,12 +220,15 @@ GameLoop.Run((dt, t) =>
     }
     else
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.R)) { Start(); state = 1; }
-        if (Input.Hit(ConsoleKey.Escape)) { state = 0; stateT = 0; }
+        var pick = deadMenu.Update();
+        if (pick == 0 || Input.Hit(ConsoleKey.R)) { Start(); state = Playing; }
+        else if (pick == 1) { state = Title; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
 
     fx.Update(dt);
+    toasts.Update(dt);
     for (var i = pops.Count - 1; i >= 0; i--)
     {
         var p = pops[i];
@@ -187,9 +242,14 @@ GameLoop.Run((dt, t) =>
     cv.ShakeY = shake > 0.3 ? rng.Next(-(int)shake, (int)shake + 1) : 0;
     DrawBackdrop();
 
-    if (state == 0)
+    if (state == Title)
     {
         DrawTitle();
+        fx.Draw(cv);
+    }
+    else if (state == Help)
+    {
+        DrawHelp();
         fx.Draw(cv);
     }
     else
@@ -197,18 +257,16 @@ GameLoop.Run((dt, t) =>
         DrawGame();
         fx.Draw(cv);
         DrawPops();
-        if (state == 2) DrawDead();
+        if (state == Dead) DrawDead();
+        if (state == Paused) DrawPause();
     }
+
+    toasts.Draw(cv, 1);
 
     if (flash > 0.01)
     {
         cv.OverlayColor = flashCol;
         cv.OverlayK = Math.Min(0.5, flash);
-    }
-    else if (state == 2)
-    {
-        cv.OverlayColor = 0x000000;
-        cv.OverlayK = 0.35;
     }
     else cv.OverlayK = 0;
 
@@ -260,7 +318,7 @@ void DrawGame()
         var vy = H - 3;
         cv.TextC(verdict, chosenIdx == correctIdx ? 0x9be564 : 0xff6f8a, vy);
     }
-    cv.TextC("1-4  /  a-d   choose          q  quit", 0x6a5a78, H - 1);
+    Ui.Hints(cv, H - 1, "1-4", "choose", "H", hintUsed ? "hint used" : "hint", "P", "pause");
 }
 
 void DrawCards()
@@ -290,6 +348,7 @@ void DrawCard(int i, int x0, int y0, int x1, int y1)
     var border = 0x3c2a48;
     var fill = 0x171020;
     var dim = false;
+    var crossed = i == hidden;
 
     if (revealT > 0)
     {
@@ -310,11 +369,19 @@ void DrawCard(int i, int x0, int y0, int x1, int y1)
         }
     }
 
+    if (crossed)
+    {
+        border = 0x2f2438;
+        fill = 0x120c18;
+        dim = true;
+    }
+
     cv.Fill(x0, y0, x1, y1, ' ', fill);
     cv.Frame(x0, y0, x1, y1, border);
 
     var letter = ((char)('a' + i)).ToString();
     cv.Text(x0 + 2, y0 + 1, $"[{letter}]", dim ? 0x4a3a56 : accent);
+    if (crossed) cv.TextRight("cope", x1 - 2, y0 + 1, 0x4a3a56);
     if (revealT > 0 && i == correctIdx)
         cv.TextRight("caught in 4k", x1 - 2, y0 + 1, 0x9be564);
     else if (revealT > 0 && i == chosenIdx)
@@ -345,32 +412,62 @@ void DrawPops()
 void DrawTitle()
 {
     var t = fx.Time;
-    var title = "d e l u l u   d e t e c t o r";
-    var x = (W - title.Length) / 2;
-    cv.TextGrad(x, 8, title, 0xff4fa3, 0xb9a7ff, (t * 0.12) % 1);
-    cv.TextGrad(x, 9, "─────────────────────────", 0xff4fa3, 0x7ff5e3, (t * 0.12) % 1);
-    cv.TextC("a quiz about reading the room", 0xd8c8e2, 12);
-    cv.TextC("(and the texts. mostly the texts.)", 0x8a7a9a, 13);
-    if (best > 0) cv.TextC($"best {best:00000}", 0xffd166, 16);
-    if (t % 1.2 < 0.75) cv.TextC("PRESS SPACE TO CATCH FEELINGS", 0xffffff, 19);
-    cv.TextC("1-4  pick the delusion       q  quit", 0x8a7a9a, 21);
-    cv.TextC("no thoughts, just receipts.", 0x5e4a6a, 23);
+    var top = Math.Max(2, (H - 14) / 2);
+    Ui.BigTitle(cv, top, "delulu detector", 0xff4fa3, 0xb9a7ff, t);
+    Ui.TextShadowC(cv, top + 2, "a quiz about reading the room", 0xd8c8e2);
+    cv.TextC("(and the texts. mostly the texts.)", 0x8a7a9a, top + 3);
+
+    titleMenu.Draw(cv, top + 5);
+
+    if (best > 0) Ui.Badge(cv, (W - 13) / 2, top + 9, $"best {best:00000}", 0xffd166, 0x241a08);
+
+    Ui.Ticker(cv, H - 3, "one of these is delulu  ·  no thoughts just receipts  ·  the group chat is typing",
+        t, 0x8a7a9a, 0x5e4a6a, 6);
+    Ui.Hints(cv, H - 1, "W/S", "select", "ENTER", "pick", "Q", "quit");
+}
+
+void DrawHelp()
+{
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(58, W - 2), Math.Min(16, H - 2), "how to play", 0xff4fa3);
+    var x = x0 + 3;
+    var y = y0 + 2;
+    y += Ui.WrapDraw(cv, x, y,
+        "four statements, one delusion. pick the one that is genuinely unhinged before the timer runs out.",
+        x1 - x - 2, Ui.Ink, 3) + 1;
+    Ui.KeyHint(cv, x, y, "1-4", "choose a card (or a-d)", 0xb9a7ff); y++;
+    Ui.KeyHint(cv, x, y, "H", "cross out one cope, costs 100", Ui.Accent2); y++;
+    Ui.KeyHint(cv, x, y, "P", "pause + settings", Ui.Gold); y += 2;
+    cv.Text(x, y, "a wrong pick or a timeout costs a brain cell.", Ui.InkDim);
+    cv.TextC("enter / esc to go back", Ui.InkFaint, y1 - 1);
+}
+
+void DrawPause()
+{
+    cv.Dim(0.45);
+    Settings.RefreshPauseLabels(pauseMenu);
+    var (_, y0, _, y1) = Ui.CenterCard(cv, 38, 11, "paused", Ui.Accent);
+    pauseMenu.Draw(cv, y0 + 2);
+    cv.TextC("P / ESC to resume", Ui.InkFaint, y1 - 1);
 }
 
 void DrawDead()
 {
-    var panelW = Math.Min(54, W - 4);
-    var x0 = (W - panelW) / 2;
-    var x1 = x0 + panelW - 1;
-    var y0 = H / 2 - 6;
-    var y1 = y0 + 11;
-    cv.Fill(x0, y0, x1, y1, ' ', 0x170c1e);
-    cv.Frame(x0, y0, x1, y1, 0xff4fa3);
-    cv.TextC("delulu detected.", 0xff9fc4, y0 + 2);
-    cv.TextC("the delusion was coming from inside the house.", 0x8a7a9a, y0 + 3);
-    cv.TextC($"{score:00000} receipts   best streak x{bestStreak}", 0xf0e8f8, y0 + 5);
-    cv.TextC(newRecord ? "new personal best (seek help)" : $"best {best:00000}", newRecord ? 0xffd166 : 0x8a7a9a, y0 + 7);
-    if (fx.Time % 1.1 < 0.75) cv.TextC("SPACE retry    ESC title    Q quit", 0xd8c8e2, y0 + 9);
+    cv.Dim(0.4);
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(54, W - 2), Math.Min(18, H - 2), "delulu detected", 0xff4fa3);
+    var cx = (x0 + x1) / 2;
+    cv.TextC("the delusion was coming from inside the house.", 0x8a7a9a, y0 + 2);
+
+    var (rank, tier) = Ui.Rank(score, new[] { 200, 500, 900, 1400, 2000, 2800 });
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 4, "receipts", $"{score:00000}", 0xf0e8f8);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 5, "rounds", round.ToString(), 0xb9a7ff);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 6, "best streak", $"x{bestStreak}", 0xff9fc4);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 7, "rank", rank, Ui.RankColor(tier));
+    Ui.Divider(cv, x0 + 2, x1 - 2, y0 + 9);
+    if (newRecord) Ui.NewBest(cv, cx, y0 + 10, fx.Time);
+    else Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 10, "best", $"{best:00000}", 0xffd166);
+
+    deadMenu.Draw(cv, y0 + 12);
+    cv.TextC("R to try again", Ui.InkFaint, y1 - 1);
 }
 
 sealed class Option
