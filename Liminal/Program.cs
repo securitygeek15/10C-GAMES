@@ -10,12 +10,23 @@ if (W == 0)
 }
 
 var cv = new Canvas(W, H);
+Settings.Apply(cv);
 var fx = new Fx();
 var rng = new Random();
 var best = Store.Best("liminal");
 var grid = new char[1, 1];
 var explored = new HashSet<(int X, int Y)>();
-var state = 0;
+const int Title = 0;
+const int Playing = 1;
+const int Result = 2;
+const int Paused = 3;
+const int Help = 4;
+var state = Title;
+var titleMenu = new Menu("noclip in", "how to play", "quit");
+var resultMenu = new Menu("go back in", "title screen", "quit");
+var pauseMenu = Settings.PauseMenu();
+var toasts = new Toasts();
+var flashLightT = 0.0;
 var won = false;
 var mw = 0;
 var mh = 0;
@@ -71,6 +82,7 @@ void Start()
     newRecord = false;
     stateT = 0;
     score = 0;
+    flashLightT = 0;
     for (var y = -2; y <= 2; y++)
         for (var x = -2; x <= 2; x++) explored.Add((px + x, py + y));
 }
@@ -365,20 +377,52 @@ GameLoop.Run((dt, t) =>
     stateT += dt;
     if (moveCd > 0) moveCd -= dt;
 
-    if (state == 0)
+    if (state == Title)
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.Enter)) { Start(); state = 1; }
+        var pick = titleMenu.Update();
+        if (pick == 0) { Start(); state = Playing; }
+        else if (pick == 1) { state = Help; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
         if (rng.NextDouble() < 0.15)
             fx.Spawn(rng.Next(W), 2 + rng.Next(Math.Max(1, H - 4)), (rng.NextDouble() - 0.5) * 2, 3 + rng.NextDouble() * 4,
                 6, 0x8a7a3a, 0x1a160a, '▓', 0, 0.02);
     }
-    else if (state == 1)
+    else if (state == Help)
+    {
+        if (Input.Confirm || Input.Back || Input.Quit) { state = Title; stateT = 0; }
+    }
+    else if (state == Paused)
+    {
+        var pick = pauseMenu.Update();
+        if (pick >= 0)
+        {
+            if (pick == 0) state = Playing;
+            else if (pick == 1) { Start(); state = Playing; }
+            else if (pick == 5) { state = Title; stateT = 0; }
+            else Settings.PauseAction(pick);
+        }
+        if (Input.Pause) state = Playing;
+        if (Input.Quit) return false;
+        Settings.RefreshPauseLabels(pauseMenu);
+    }
+    else if (state == Playing)
     {
         if (Input.Quit) return false;
+        if (Input.Pause) { state = Paused; pauseMenu.Index = 0; stateT = 0; }
         elapsed += dt;
         sanity -= (0.55 + tapes * 0.08) * dt;
         if (sanity <= 0) { sanity = 0; Die(); }
+        if (flashLightT > 0) flashLightT = Math.Max(0, flashLightT - dt);
+        else if (Input.Hit(ConsoleKey.F) && sanity > 12)
+        {
+            flashLightT = 3.2;
+            sanity -= 8;
+            eventText = "the flash reveals more than you wanted.";
+            eventT = 3;
+            fx.Ring(ox + px, oy + py, 24, 18, 0.6, 0xfff3c4, 0xffd166, '✦');
+            toasts.Push("camera flash: -8 sanity", 0xfff3c4);
+        }
 
         if (moveCd <= 0)
         {
@@ -407,21 +451,29 @@ GameLoop.Run((dt, t) =>
     }
     else
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.R)) { Start(); state = 1; }
-        if (Input.Hit(ConsoleKey.Escape)) { state = 0; stateT = 0; }
+        var pick = resultMenu.Update();
+        if (pick == 0 || Input.Hit(ConsoleKey.R)) { Start(); state = Playing; }
+        else if (pick == 1) { state = Title; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
 
     fx.Update(dt);
+    toasts.Update(dt);
 
     cv.Clear();
     cv.ShakeX = shake > 0.3 ? rng.Next(-(int)shake, (int)shake + 1) : 0;
     cv.ShakeY = shake > 0.3 ? rng.Next(-(int)shake, (int)shake + 1) : 0;
     DrawBackdrop();
 
-    if (state == 0)
+    if (state == Title)
     {
         DrawTitle();
+        fx.Draw(cv);
+    }
+    else if (state == Help)
+    {
+        DrawHelp();
         fx.Draw(cv);
     }
     else
@@ -429,18 +481,16 @@ GameLoop.Run((dt, t) =>
         DrawMaze(t);
         fx.Draw(cv);
         DrawHud();
-        if (state == 2) DrawResult();
+        if (state == Result) DrawResult();
+        if (state == Paused) DrawPause();
     }
+
+    toasts.Draw(cv, 1);
 
     if (flash > 0.01)
     {
         cv.OverlayColor = flashCol;
         cv.OverlayK = Math.Min(0.8, flash);
-    }
-    else if (state == 2)
-    {
-        cv.OverlayColor = 0x000000;
-        cv.OverlayK = 0.3;
     }
     else cv.OverlayK = 0;
 
@@ -469,6 +519,7 @@ void DrawMaze(double time)
 {
     var radius = 4.4 + 0.5 * Math.Sin(time * 2.7);
     if ((int)(time * 7) % 19 == 0) radius = 3.0;
+    if (flashLightT > 0) radius = 9.0;
     var warm = 0.5 + 0.5 * Math.Sin(time * 1.3);
 
     for (var y = 0; y < mh; y++)
@@ -544,9 +595,11 @@ void DrawHud()
 
     if (eventT > 0)
         cv.TextC(eventText, Col.Scale(0xd8c884, Math.Min(1, eventT)), H - 2);
+    else if (flashLightT > 0)
+        cv.TextC("the flash is still burning.", 0xfff3c4, H - 2);
     else
         cv.TextC("the hum continues.", 0x4a4228, H - 2);
-    cv.TextC("wasd / arrows move     q quit", 0x5a5030, H - 1);
+    Ui.Hints(cv, H - 1, "WASD", "move", "F", flashLightT > 0 ? "flash on" : "flash", "P", "pause");
 
     if (ox > 8)
     {
@@ -559,42 +612,68 @@ void DrawHud()
 void DrawTitle()
 {
     var time = fx.Time;
-    var title = "l i m i n a l";
-    var x = (W - title.Length) / 2;
-    cv.TextGrad(x, Math.Max(4, H / 2 - 6), title, 0xd8c884, 0x7ff5e3, (time * 0.1) % 1);
-    cv.TextGrad(x, Math.Max(5, H / 2 - 5), "─────────────", 0xd8c884, 0x7ff5e3, (time * 0.1) % 1);
-    cv.TextC("level 0: the group chat has no exit", 0xe0d8b0, H / 2 - 2);
-    cv.TextC("find 3 vhs tapes. find the door. do not get comfortable.", 0x8a7a4a, H / 2 - 1);
-    cv.TextC("wasd / arrows move      q quit", 0x6a5a3a, H / 2 + 2);
-    if (best > 0) cv.TextC($"best {best}", 0xffd166, H / 2 + 4);
-    if (time % 1.3 < 0.8) cv.TextC("PRESS SPACE TO NOCLIP", 0xffffff, H / 2 + 6);
-    cv.TextC("the carpet is damp. you are fine. probably.", 0x4a4228, H - 2);
+    var top = Math.Max(2, (H - 15) / 2);
+    Ui.BigTitle(cv, top, "liminal", 0xd8c884, 0x7ff5e3, time);
+    Ui.TextShadowC(cv, top + 2, "level 0: the group chat has no exit", 0xe0d8b0);
+    cv.TextC("find 3 vhs tapes. find the door. do not get comfortable.", 0x8a7a4a, top + 3);
+
+    titleMenu.Draw(cv, top + 5);
+
+    if (best > 0) Ui.Badge(cv, (W - 11) / 2, top + 9, $"best {best}", 0xffd166, 0x241a08);
+
+    Ui.Ticker(cv, H - 3, "the carpet is damp  ·  the lights buzz in b flat  ·  you are fine. probably.",
+        time, 0x8a7a4a, 0x4a4228, 5);
+    Ui.Hints(cv, H - 1, "W/S", "select", "ENTER", "pick", "Q", "quit");
+}
+
+void DrawHelp()
+{
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(58, W - 2), Math.Min(18, H - 2), "how to play", 0xd8c884);
+    var x = x0 + 3;
+    var y = y0 + 2;
+    y += Ui.WrapDraw(cv, x, y,
+        "a maze in the dark. find three vhs tapes, then the door. something starts following you after the second tape.",
+        x1 - x - 2, Ui.Ink, 3) + 1;
+    Ui.KeyHint(cv, x, y, "WASD", "move", 0xd8c884); y++;
+    Ui.KeyHint(cv, x, y, "F", "camera flash: sees further, costs 8 sanity", 0xfff3c4); y++;
+    Ui.KeyHint(cv, x, y, "P", "pause + settings", Ui.Gold); y += 2;
+    cv.Set(x, y, '▣', 0x7ff5e3); cv.Text(x + 2, y, "vhs tape: +10 sanity", Ui.InkDim); y++;
+    cv.Set(x, y, '○', 0x6fb8c8); cv.Text(x + 2, y, "almond water: +28 sanity", Ui.InkDim); y++;
+    cv.Set(x, y, '?', 0xff5c7a); cv.Text(x + 2, y, "that: -22 sanity if it catches you", Ui.InkDim); y++;
+    cv.Text(x, y, "sanity also drains on its own. faster with tapes.", Ui.InkFaint);
+    cv.TextC("enter / esc to go back", Ui.InkFaint, y1 - 1);
+}
+
+void DrawPause()
+{
+    cv.Dim(0.45);
+    Settings.RefreshPauseLabels(pauseMenu);
+    var (_, y0, _, y1) = Ui.CenterCard(cv, 38, 11, "paused", Ui.Accent);
+    pauseMenu.Draw(cv, y0 + 2);
+    cv.TextC("P / ESC to resume", Ui.InkFaint, y1 - 1);
 }
 
 void DrawResult()
 {
-    var panelW = Math.Min(60, W - 4);
-    var x0 = (W - panelW) / 2;
-    var x1 = x0 + panelW - 1;
-    var y0 = Math.Max(3, H / 2 - 7);
-    var y1 = Math.Min(H - 2, y0 + 12);
-    cv.Fill(x0, y0, x1, y1, ' ', 0x0b0a05);
-    cv.Frame(x0, y0, x1, y1, won ? 0x9be564 : 0x8a5a2a);
+    cv.Dim(0.3);
+    var w = Math.Min(58, W - 2);
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, w, Math.Min(18, H - 2), won ? "escaped" : "still here", won ? 0x9be564 : 0x8a5a2a);
+    var cx = (x0 + x1) / 2;
+    cv.TextC(won ? "you noclipped out." : "the hum got you.", won ? 0x9be564 : 0xff5c7a, y0 + 2);
+    var body = Ui.Wrap(won
+        ? "the door opened into a parking garage. your group chat has 47 unread messages. you do not open them."
+        : "you are now part of level 0. someone will find your playlist. eventually.", w - 6);
+    for (var i = 0; i < body.Length && i < 3; i++)
+        cv.Text(x0 + 3, y0 + 4 + i, body[i], won ? 0xd8d0a8 : 0xa89870);
 
-    if (won)
-    {
-        cv.TextC("you noclipped out.", 0x9be564, y0 + 2);
-        var body = Ui.Wrap("the door opened into a parking garage. your group chat has 47 unread messages. you do not open them.", panelW - 6);
-        for (var i = 0; i < body.Length && i < 3; i++) cv.Text(x0 + 3, y0 + 4 + i, body[i], 0xd8d0a8);
-    }
-    else
-    {
-        cv.TextC("the hum got you.", 0xff5c7a, y0 + 2);
-        var body = Ui.Wrap("you are now part of level 0. someone will find your playlist. eventually.", panelW - 6);
-        for (var i = 0; i < body.Length && i < 3; i++) cv.Text(x0 + 3, y0 + 4 + i, body[i], 0xa89870);
-    }
+    var (rank, tier) = Ui.Rank(score, new[] { 200, 400, 700, 1000, 1400, 1900 });
+    Ui.Divider(cv, x0 + 2, x1 - 2, y0 + 8);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 9, "tapes / time", $"{tapes}/3   {elapsed:0.0}s", 0xd8c884);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 10, "score", score.ToString(), 0xf4ffe8);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 11, "rank", rank, Ui.RankColor(tier));
+    if (newRecord) Ui.NewBest(cv, cx, y0 + 12, fx.Time);
+    else Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 12, "best", best.ToString(), 0xffd166);
 
-    cv.TextC($"tapes {tapes}/3    time {elapsed:0.0}s    score {score}", 0xd8c884, y0 + 8);
-    cv.TextC(newRecord ? "new personal best" : $"best {best}", newRecord ? 0xffd166 : 0x6a5a3a, y0 + 9);
-    if (fx.Time % 1.1 < 0.75) cv.TextC("SPACE again    ESC title    Q quit", 0xe0d8b0, y0 + 11);
+    resultMenu.Draw(cv, y0 + 13);
+    cv.TextC("R to go back in", Ui.InkFaint, y1 - 1);
 }
