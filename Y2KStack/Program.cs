@@ -10,13 +10,25 @@ if (W == 0)
 }
 
 var cv = new Canvas(W, H);
+Settings.Apply(cv);
 var fx = new Fx();
 var rng = new Random();
 var best = Store.Best("y2kstack");
 var board = new int[10, 20];
 var bag = new List<int>();
 var pops = new List<Pop>();
-var state = 0;          // 0 title, 1 play, 2 pause, 3 over
+const int Title = 0;
+const int Playing = 1;
+const int Paused = 2;
+const int OverState = 3;
+const int Help = 4;
+var state = Title;
+var titleMenu = new Menu("insert disc", "how to play", "quit");
+var overMenu = new Menu("burn another", "title screen", "quit");
+var pauseMenu = Settings.PauseMenu();
+var toasts = new Toasts();
+var heldType = -1;
+var holdUsed = false;
 var score = 0;
 var lines = 0;
 var burned = 0;
@@ -63,6 +75,8 @@ void Start()
     shake = 0;
     flash = 0;
     newRecord = false;
+    heldType = -1;
+    holdUsed = false;
     nextType = NextType();
     Spawn();
     stateT = 0;
@@ -92,6 +106,23 @@ void Spawn()
     curX = 3;
     curY = 0;
     fallAcc = 0;
+    holdUsed = false;
+    if (Collides(curShape, curX, curY)) Over();
+}
+
+void HoldPiece()
+{
+    if (holdUsed) return;
+    holdUsed = true;
+    var swap = heldType;
+    heldType = curType;
+    curType = swap < 0 ? nextType : swap;
+    if (swap < 0) nextType = NextType();
+    curShape = (int[,])shapes[curType].Clone();
+    curX = 3;
+    curY = 0;
+    fallAcc = 0;
+    fx.Spark(bx + 10, by + 10, colors[curType], 10);
     if (Collides(curShape, curX, curY)) Over();
 }
 
@@ -251,27 +282,49 @@ GameLoop.Run((dt, t) =>
     if (flash > 0) flash = Math.Max(0, flash - dt * 2.4);
     stateT += dt;
 
-    if (state == 0)
+    if (state == Title)
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.Enter)) { Start(); state = 1; }
+        var pick = titleMenu.Update();
+        if (pick == 0) { Start(); state = Playing; }
+        else if (pick == 1) { state = Help; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
         if (rng.NextDouble() < 0.2)
             fx.Spawn(rng.Next(W), H, (rng.NextDouble() - 0.5) * 1.5, -1.5 - rng.NextDouble() * 2.5,
                 4.5, 0x7ff5e3, 0xff8fc8, '✦', 0, 0.04);
     }
-    else if (state == 1)
+    else if (state == Help)
+    {
+        if (Input.Confirm || Input.Back || Input.Quit) { state = Title; stateT = 0; }
+    }
+    else if (state == Paused)
+    {
+        var pick = pauseMenu.Update();
+        if (pick >= 0)
+        {
+            if (pick == 0) state = Playing;
+            else if (pick == 1) { Start(); state = Playing; }
+            else if (pick == 5) { state = Title; stateT = 0; }
+            else Settings.PauseAction(pick);
+        }
+        if (Input.Pause) state = Playing;
+        if (Input.Quit) return false;
+        Settings.RefreshPauseLabels(pauseMenu);
+    }
+    else if (state == Playing)
     {
         if (Input.Quit) return false;
-        if (Input.Hit(ConsoleKey.P) || Input.Hit(ConsoleKey.Escape)) { state = 2; stateT = 0; }
+        if (Input.Hit(ConsoleKey.P) || Input.Hit(ConsoleKey.Escape)) { state = Paused; pauseMenu.Index = 0; stateT = 0; }
         else
         {
             if (Input.Hit(ConsoleKey.LeftArrow) || Input.Hit(ConsoleKey.A)) TryMove(-1, 0);
             if (Input.Hit(ConsoleKey.RightArrow) || Input.Hit(ConsoleKey.D)) TryMove(1, 0);
             if (Input.Hit(ConsoleKey.DownArrow) || Input.Hit(ConsoleKey.S)) StepDown();
             if (Input.Hit(ConsoleKey.UpArrow) || Input.Hit(ConsoleKey.W) || Input.Hit(ConsoleKey.X)) TryRotate();
+            if (Input.Hit(ConsoleKey.C)) HoldPiece();
             if (Input.Hit(ConsoleKey.Spacebar)) HardDrop();
 
-            if (state == 1)
+            if (state == Playing)
             {
                 var interval = Math.Max(0.07, 0.68 - (level - 1) * 0.055);
                 fallAcc += dt * (Input.Held(ConsoleKey.DownArrow) || Input.Held(ConsoleKey.S) ? 9 : 1);
@@ -283,20 +336,17 @@ GameLoop.Run((dt, t) =>
             }
         }
     }
-    else if (state == 2)
-    {
-        if (Input.Hit(ConsoleKey.P) || Input.Hit(ConsoleKey.Escape)) state = 1;
-        if (Input.Hit(ConsoleKey.R)) { Start(); state = 1; }
-        if (Input.Quit) return false;
-    }
     else
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.R)) { Start(); state = 1; }
-        if (Input.Hit(ConsoleKey.Escape)) { state = 0; stateT = 0; }
+        var pick = overMenu.Update();
+        if (pick == 0 || Input.Hit(ConsoleKey.R)) { Start(); state = Playing; }
+        else if (pick == 1) { state = Title; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
 
     fx.Update(dt);
+    toasts.Update(dt);
     for (var i = pops.Count - 1; i >= 0; i--)
     {
         var p = pops[i];
@@ -310,9 +360,14 @@ GameLoop.Run((dt, t) =>
     cv.ShakeY = shake > 0.3 ? rng.Next(-(int)shake, (int)shake + 1) : 0;
     DrawBackdrop();
 
-    if (state == 0)
+    if (state == Title)
     {
         DrawTitle();
+        fx.Draw(cv);
+    }
+    else if (state == Help)
+    {
+        DrawHelp();
         fx.Draw(cv);
     }
     else
@@ -321,19 +376,16 @@ GameLoop.Run((dt, t) =>
         DrawPanel();
         fx.Draw(cv);
         DrawPops();
-        if (state == 2) DrawPause();
-        if (state == 3) DrawOver();
+        if (state == Paused) DrawPause();
+        if (state == OverState) DrawOver();
     }
+
+    toasts.Draw(cv, 1);
 
     if (flash > 0.01)
     {
         cv.OverlayColor = flashCol;
         cv.OverlayK = Math.Min(0.5, flash);
-    }
-    else if (state == 3)
-    {
-        cv.OverlayColor = 0x000000;
-        cv.OverlayK = 0.35;
     }
     else cv.OverlayK = 0;
 
@@ -422,11 +474,20 @@ void DrawBoard()
 void DrawPanel()
 {
     cv.Text(panelX, by, "next", 0x7fa0c0);
+    cv.Text(panelX + 9, by, "hold", 0x7fa0c0);
     var c = colors[nextType];
     for (var y = 0; y < 4; y++)
         for (var x = 0; x < 4; x++)
             if (shapes[nextType][y, x] != 0)
                 cv.Set(panelX + 2 + x, by + 2 + y, '█', c);
+    if (heldType >= 0)
+    {
+        var hc = holdUsed ? Col.Scale(colors[heldType], 0.4) : colors[heldType];
+        for (var y = 0; y < 4; y++)
+            for (var x = 0; x < 4; x++)
+                if (shapes[heldType][y, x] != 0)
+                    cv.Set(panelX + 10 + x, by + 2 + y, '▓', hc);
+    }
 
     cv.Text(panelX, by + 7, $"score {score:000000}", 0xd8e8ff);
     cv.Text(panelX, by + 8, $"best  {best:000000}", 0x5a7a9a);
@@ -438,8 +499,9 @@ void DrawPanel()
     cv.Text(panelX, by + 14, "up          rotate", 0x5a7a9a);
     cv.Text(panelX, by + 15, "down        soft", 0x5a7a9a);
     cv.Text(panelX, by + 16, "space       drop", 0x5a7a9a);
-    cv.Text(panelX, by + 17, "p / esc     pause", 0x5a7a9a);
-    cv.Text(panelX, by + 18, "q           quit", 0x3e5a72);
+    cv.Text(panelX, by + 17, "c           hold", 0x7fa0c0);
+    cv.Text(panelX, by + 18, "p / esc     pause", 0x5a7a9a);
+    cv.Text(panelX, by + 19, "q           quit", 0x3e5a72);
     cv.TextRight("2001", W - 3, 0, 0x3e5a72);
 
     cv.TextGrad(2, 0, "y2k stack", 0x7ff5e3, 0xff8fc8, (hue / 360) % 1);
@@ -458,48 +520,69 @@ void DrawPops()
 
 void DrawPause()
 {
-    var boxW = Math.Min(34, W - 8);
-    var px0 = (W - boxW) / 2;
-    var y0 = by + 7;
-    cv.Fill(px0, y0, px0 + boxW, y0 + 6, ' ', 0x0a0f1a);
-    cv.Frame(px0, y0, px0 + boxW, y0 + 6, 0x7ff5e3);
-    cv.TextC("PAUSED", 0xffffff, y0 + 2);
-    cv.TextC("P / ESC resume    R restart", 0x8aa0c0, y0 + 4);
-    cv.TextC("Q quit", 0x5a7a9a, y0 + 5);
+    cv.Dim(0.45);
+    Settings.RefreshPauseLabels(pauseMenu);
+    var (_, y0, _, y1) = Ui.CenterCard(cv, Math.Min(40, W - 4), Math.Min(12, H - 2), "paused", 0x7ff5e3);
+    pauseMenu.Draw(cv, y0 + 2);
+    cv.TextC("P / ESC to resume", Ui.InkFaint, y1 - 1);
 }
 
 void DrawTitle()
 {
     var t = fx.Time;
-    var bandY = Math.Max(4, H / 2 - 5);
+    var bandY = Math.Max(2, (H - 16) / 2);
     for (var y = bandY; y < bandY + 5; y++)
         for (var x = 3; x < W - 3; x++)
             cv.Set(x, y, ' ', Col.Hsl(190 + x * 1.6 + (y - bandY) * 8, 0.45, 0.3));
 
-    cv.TextC("y 2 k   s t a c k", 0xf4ffff, bandY + 1);
+    cv.TextC("Y 2 K   S T A C K", 0xf4ffff, bandY + 1);
     cv.TextC("the year is 2001. the blocks are forever.", 0xbfe8ff, bandY + 3);
 
-    cv.TextC("stack the tech. burn the cds. survive the drop.", 0x8aa0c0, bandY + 7);
-    if (best > 0) cv.TextC($"best {best:000000}", 0xffe066, bandY + 9);
-    if (t % 1.25 < 0.8) cv.TextC("PRESS SPACE TO INSERT DISC", 0xffffff, bandY + 11);
-    cv.TextC("arrows move/rotate     space drop     q quit", 0x5a7a9a, H - 2);
-    cv.TextC("now loading: your childhood.", 0x3e5a72, H - 1);
+    titleMenu.Draw(cv, bandY + 7);
+
+    cv.TextC("stack the tech. burn the cds. survive the drop.", 0x8aa0c0, bandY + 11);
+    if (best > 0) Ui.Badge(cv, (W - 13) / 2, bandY + 13, $"best {best:000000}", 0xffe066, 0x242008);
+
+    Ui.Ticker(cv, H - 3, "now loading: your childhood  ·  please insert disc 2  ·  chrome blocks forever",
+        t, 0x5a7a9a, 0x3e5a72, 6);
+    Ui.Hints(cv, H - 1, "W/S", "select", "ENTER", "pick", "Q", "quit");
+}
+
+void DrawHelp()
+{
+    var (hx0, hy0, hx1, hy1) = Ui.CenterCard(cv, Math.Min(58, W - 2), Math.Min(18, H - 2), "how to play", 0x7ff5e3);
+    var x = hx0 + 3;
+    var y = hy0 + 2;
+    y += Ui.WrapDraw(cv, x, y,
+        "stack the cd cases. fill a row to burn it. the higher the level, the faster the drop.",
+        hx1 - x - 2, Ui.Ink, 3) + 1;
+    Ui.KeyHint(cv, x, y, "←/→", "move", 0x7ff5e3); y++;
+    Ui.KeyHint(cv, x, y, "↑/X", "rotate", 0x9be564); y++;
+    Ui.KeyHint(cv, x, y, "SPACE", "hard drop, scores per row", Ui.Gold); y++;
+    Ui.KeyHint(cv, x, y, "C", "hold a piece (once per drop)", 0xff8fc8); y++;
+    Ui.KeyHint(cv, x, y, "P", "pause + settings", Ui.Accent); y += 2;
+    cv.Text(x, y, "four rows at once is a burned mixtape.", Ui.InkDim);
+    cv.TextC("enter / esc to go back", Ui.InkFaint, hy1 - 1);
 }
 
 void DrawOver()
 {
-    var panelW = Math.Min(58, W - 4);
-    var x0 = (W - panelW) / 2;
-    var x1 = x0 + panelW - 1;
-    var y0 = Math.Max(3, H / 2 - 6);
-    var y1 = Math.Min(H - 2, y0 + 10);
-    cv.Fill(x0, y0, x1, y1, ' ', 0x080c14);
-    cv.Frame(x0, y0, x1, y1, 0xff8fc8);
-    cv.TextC("stack overflow.", 0xff8fc8, y0 + 2);
-    cv.TextC("the y2k bug won.", 0x8aa0c0, y0 + 3);
-    cv.TextC($"score {score:000000}    lines {lines}    level {level}", 0xd8e8ff, y0 + 5);
-    cv.TextC(newRecord ? "new personal best" : $"best {best:000000}", newRecord ? 0xffe066 : 0x5a7a9a, y0 + 6);
-    if (fx.Time % 1.15 < 0.78) cv.TextC("SPACE again    ESC title    Q quit", 0xd8e8ff, y0 + 9);
+    cv.Dim(0.4);
+    var (dx0, dy0, dx1, dy1) = Ui.CenterCard(cv, Math.Min(56, W - 2), Math.Min(18, H - 2), "stack overflow", 0xff8fc8);
+    var cx = (dx0 + dx1) / 2;
+    cv.TextC("the y2k bug won.", 0x8aa0c0, dy0 + 2);
+
+    var (rank, tier) = Ui.Rank(score, new[] { 500, 1500, 3000, 6000, 10000, 16000 });
+    Ui.ScoreRow(cv, dx0 + 3, dx1 - 3, dy0 + 4, "score", $"{score:000000}", 0xd8e8ff);
+    Ui.ScoreRow(cv, dx0 + 3, dx1 - 3, dy0 + 5, "lines", lines.ToString(), 0xb9a7ff);
+    Ui.ScoreRow(cv, dx0 + 3, dx1 - 3, dy0 + 6, "level / cds", $"{level} / {burned}", 0x7ff5e3);
+    Ui.ScoreRow(cv, dx0 + 3, dx1 - 3, dy0 + 7, "rank", rank, Ui.RankColor(tier));
+    Ui.Divider(cv, dx0 + 2, dx1 - 2, dy0 + 9);
+    if (newRecord) Ui.NewBest(cv, cx, dy0 + 10, fx.Time);
+    else Ui.ScoreRow(cv, dx0 + 3, dx1 - 3, dy0 + 10, "best", $"{best:000000}", 0xffe066);
+
+    overMenu.Draw(cv, dy0 + 12);
+    cv.TextC("R to burn another", Ui.InkFaint, dy1 - 1);
 }
 
 sealed class Pop
