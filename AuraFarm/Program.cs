@@ -10,13 +10,23 @@ if (W == 0)
 }
 
 var cv = new Canvas(W, H);
+Settings.Apply(cv);
 var fx = new Fx();
 var rng = new Random();
 var best = Store.Best("aurafarm");
 var orbs = new List<Orb>();
 var enemies = new List<Enemy>();
 var pops = new List<Pop>();
-var state = 0;
+const int Title = 0;
+const int Playing = 1;
+const int Dead = 2;
+const int Paused = 3;
+const int Help = 4;
+var state = Title;
+var titleMenu = new Menu("farm aura", "how to play", "quit");
+var deadMenu = new Menu("run it back", "title screen", "quit");
+var pauseMenu = Settings.PauseMenu();
+var toasts = new Toasts();
 var aura = 0;
 var hearts = 3;
 var combo = 0;
@@ -42,6 +52,7 @@ var bannerCol = 0xffffff;
 var nextMilestone = 2500;
 var newRecord = false;
 var gone = 0;
+var bonusAcc = 8.0;
 var milestones = new[]
 {
     "main character era", "it's giving protagonist", "silent confidence", "aura farming",
@@ -68,13 +79,15 @@ void Start()
     bannerT = 0;
     nextMilestone = 2500;
     newRecord = false;
+    bonusAcc = 8;
     orbs.Clear();
     enemies.Clear();
     pops.Clear();
+    toasts.Push("go be the main character", 0xb9a7ff);
     for (var i = 0; i < 8; i++) AddOrb();
 }
 
-void AddOrb()
+void AddOrb(int kind = 0)
 {
     double x, y;
     var tries = 0;
@@ -84,7 +97,7 @@ void AddOrb()
         y = rng.Next(4, Math.Max(5, H - 2));
         tries++;
     } while (tries < 30 && Math.Abs(x - playerX) + Math.Abs(y - playerY) < 8);
-    orbs.Add(new Orb { X = x, Y = y, Phase = rng.NextDouble() * Math.PI * 2 });
+    orbs.Add(new Orb { X = x, Y = y, Phase = rng.NextDouble() * Math.PI * 2, Kind = kind });
 }
 
 void SpawnEnemy()
@@ -107,6 +120,41 @@ void SpawnEnemy()
 
 void Collect(Orb orb)
 {
+    if (orb.Kind == 2)
+    {
+        orbs.Remove(orb);
+        AddOrb();
+        if (hearts < 3)
+        {
+            hearts++;
+            AddPop(orb.X, orb.Y, "+1 heart", 0xff9fc4);
+            toasts.Push("self care acquired", 0xff9fc4);
+        }
+        else
+        {
+            aura += 250;
+            AddPop(orb.X, orb.Y, "+250 full hearts", 0xff9fc4);
+        }
+        fx.Burst(orb.X, orb.Y, 16, 0xff9fc4, 0x4a1a2a, 12, 0.7, 0, 2.5, '♥');
+        return;
+    }
+    if (orb.Kind == 1)
+    {
+        orbs.Remove(orb);
+        AddOrb();
+        aura += 1500;
+        combo = Math.Min(10, combo + 2);
+        comboT = 2.8;
+        invuln = Math.Max(invuln, 1.4);
+        banner = "hyper aura";
+        bannerCol = 0xffd166;
+        bannerT = 2.0;
+        shake = 6;
+        AddPop(orb.X, orb.Y, "+1500 HYPER", 0xffd166);
+        fx.Ring(orb.X, orb.Y, 24, 22, 0.65, 0xffd166, 0xffffff, '✦');
+        toasts.Push("hyper aura +1500", 0xffd166);
+        return;
+    }
     var mult = Math.Min(10, 1 + combo);
     var gain = 100 * mult;
     aura += gain;
@@ -175,8 +223,11 @@ GameLoop.Run((dt, t) =>
     if (shake > 0) shake = Math.Max(0, shake - dt * 26);
     if (flash > 0) flash = Math.Max(0, flash - dt * 2.2);
     if (bannerT > 0) bannerT = Math.Max(0, bannerT - dt);
-    if (invuln > 0) invuln = Math.Max(0, invuln - dt);
-    if (dashCd > 0) dashCd = Math.Max(0, dashCd - dt);
+    if (state != Paused)
+    {
+        if (invuln > 0) invuln = Math.Max(0, invuln - dt);
+        if (dashCd > 0) dashCd = Math.Max(0, dashCd - dt);
+    }
     stateT += dt;
 
     var ix = 0.0;
@@ -186,14 +237,36 @@ GameLoop.Run((dt, t) =>
     if (Input.HeldAny(ConsoleKey.W, ConsoleKey.UpArrow)) iy -= 1;
     if (Input.HeldAny(ConsoleKey.S, ConsoleKey.DownArrow)) iy += 1;
 
-    if (state == 0)
+    if (state == Title)
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.Enter)) { Start(); state = 1; }
+        var pick = titleMenu.Update();
+        if (pick == 0) { Start(); state = Playing; }
+        else if (pick == 1) { state = Help; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
-    else if (state == 1)
+    else if (state == Help)
+    {
+        if (Input.Confirm || Input.Back || Input.Quit) { state = Title; stateT = 0; }
+    }
+    else if (state == Paused)
+    {
+        var pick = pauseMenu.Update();
+        if (pick >= 0)
+        {
+            if (pick == 0) state = Playing;
+            else if (pick == 1) { Start(); state = Playing; }
+            else if (pick == 5) { state = Title; stateT = 0; }
+            else Settings.PauseAction(pick);
+        }
+        if (Input.Pause) state = Playing;
+        if (Input.Quit) return false;
+        Settings.RefreshPauseLabels(pauseMenu);
+    }
+    else if (state == Playing)
     {
         if (Input.Quit) return false;
+        if (Input.Pause) { state = Paused; pauseMenu.Index = 0; stateT = 0; }
         elapsed += dt;
         comboT -= dt;
         if (comboT <= 0) combo = 0;
@@ -278,24 +351,42 @@ GameLoop.Run((dt, t) =>
             if (p.Life <= 0) { pops.RemoveAt(i); continue; }
             p.Y -= dt * 7;
         }
+
+        // every so often something better than plain aura shows up
+        bonusAcc -= dt;
+        if (bonusAcc <= 0 && orbs.Count < 10)
+        {
+            bonusAcc = 9 + rng.NextDouble() * 7;
+            AddOrb(rng.NextDouble() < 0.55 ? 1 : 2);
+            AddPop(playerX, playerY - 2, "something nice dropped", 0x9be7ff);
+            fx.Spark(playerX, playerY, 0x9be7ff, 10);
+        }
     }
     else
     {
-        if (Input.Hit(ConsoleKey.Spacebar) || Input.Hit(ConsoleKey.R)) { Start(); state = 1; }
-        if (Input.Hit(ConsoleKey.Escape)) { state = 0; stateT = 0; }
+        var pick = deadMenu.Update();
+        if (pick == 0 || Input.Hit(ConsoleKey.R)) { Start(); state = Playing; }
+        else if (pick == 1) { state = Title; stateT = 0; }
+        else if (pick == 2) return false;
         if (Input.Quit) return false;
     }
 
     fx.Update(dt);
+    toasts.Update(dt);
 
     cv.Clear();
     cv.ShakeX = shake > 0.3 ? rng.Next(-(int)shake, (int)shake + 1) : 0;
     cv.ShakeY = shake > 0.3 ? rng.Next(-(int)shake, (int)shake + 1) : 0;
     DrawBackdrop();
 
-    if (state == 0)
+    if (state == Title)
     {
         DrawTitle();
+        fx.Draw(cv);
+    }
+    else if (state == Help)
+    {
+        DrawHelp();
         fx.Draw(cv);
     }
     else
@@ -304,18 +395,16 @@ GameLoop.Run((dt, t) =>
         fx.Draw(cv);
         DrawPops();
         DrawHud();
-        if (state == 2) DrawDead();
+        if (state == Dead) DrawDead();
+        if (state == Paused) DrawPause();
     }
+
+    toasts.Draw(cv, 1);
 
     if (flash > 0.01)
     {
         cv.OverlayColor = flashCol;
         cv.OverlayK = Math.Min(0.6, flash);
-    }
-    else if (state == 2)
-    {
-        cv.OverlayColor = 0x000000;
-        cv.OverlayK = 0.3;
     }
     else cv.OverlayK = 0;
 
@@ -349,6 +438,24 @@ void DrawArena()
         var pulse = 0.5 + 0.5 * Math.Sin(fx.Time * 5 + o.Phase);
         var x = (int)Math.Round(o.X);
         var y = (int)Math.Round(o.Y);
+        if (o.Kind == 2)
+        {
+            cv.Set(x, y, '♥', Col.Mix(0xff9fc4, 0xffffff, pulse));
+            cv.Set(x - 1, y, '·', 0x6a2a3a);
+            cv.Set(x + 1, y, '·', 0x6a2a3a);
+            continue;
+        }
+        if (o.Kind == 1)
+        {
+            cv.Set(x, y, '◈', Col.Mix(0xffd166, 0xffffff, pulse));
+            for (var k = 0; k < 4; k++)
+            {
+                var a = fx.Time * 2.6 + k * Math.PI / 2;
+                cv.Set((int)Math.Round(x + Math.Cos(a) * 2.6), (int)Math.Round(y + Math.Sin(a) * 1.4),
+                    '✦', 0x8a6a2a);
+            }
+            continue;
+        }
         cv.Set(x, y, '✦', Col.Hsl(46 + pulse * 10, 1, 0.55 + pulse * 0.15));
         for (var k = 0; k < 2; k++)
         {
@@ -390,10 +497,10 @@ void DrawArena()
         cv.Set(px + 1, py, '✦', 0xb9a7ff);
     }
 
-    if (bannerT > 0 && state == 1)
+    if (bannerT > 0 && state == Playing)
     {
         var k = Math.Min(1.0, bannerT / 0.5);
-        cv.TextC(banner, Col.Scale(bannerCol, k), H / 2 - 1);
+        Ui.Badge(cv, (W - banner.Length - 2) / 2, H / 2 - 1, banner, Col.Scale(bannerCol, k), 0x120c1e);
     }
 }
 
@@ -416,22 +523,21 @@ void DrawHud()
     cv.TextC($"{elapsed:0.0}s   npcs {enemies.Count}", 0x6a5a88, 1);
     Ui.Bar(cv, 2, H - 2, 10, 1 - Math.Clamp(dashCd / 1.25, 0, 1), 0xb9a7ff, 0x7ff5e3);
     cv.Text(14, H - 2, dashCd <= 0 ? "dash ready" : "dash charging", dashCd <= 0 ? 0x7ff5e3 : 0x5a4a72);
-    cv.TextC("wasd / arrows move     space dash     q quit", 0x4e4068, H - 1);
+    Ui.Hints(cv, H - 1, "WASD", "move", "SPACE", "dash", "P", "pause");
 }
 
 void DrawTitle()
 {
     var t = fx.Time;
-    var top = Math.Max(4, H / 2 - 6);
-    var title = "a u r a   f a r m";
-    var x = (W - title.Length) / 2;
-    cv.TextGrad(x, top, title, 0xb9a7ff, 0x7ff5e3, (t * 0.13) % 1);
-    cv.TextGrad(x, top + 1, "─────────────────", 0xff4fa3, 0xffd166, (t * 0.13) % 1);
-    cv.TextC("you are the main character. act accordingly.", 0xe0d8f0, top + 4);
-    cv.TextC("collect aura. dodge npcs. stay mysterious.", 0x8a7aa8, top + 5);
+    var top = Math.Max(2, (H - 13) / 2);
+    Ui.BigTitle(cv, top, "aura farm", 0xb9a7ff, 0x7ff5e3, t);
+    Ui.TextShadowC(cv, top + 2, "you are the main character. act accordingly.", 0xe0d8f0);
+    cv.TextC("collect aura  ·  dodge npcs  ·  stay mysterious", 0x8a7aa8, top + 3);
+
+    titleMenu.Draw(cv, top + 5);
 
     var px = W / 2;
-    var py = top + 8;
+    var py = top + 9;
     for (var k = 0; k < 12; k++)
     {
         var a = t * 0.9 + k * Math.PI / 6;
@@ -442,26 +548,57 @@ void DrawTitle()
     cv.Set(px - 2, py, '✦', 0xffd166);
     cv.Set(px + 2, py, '✦', 0xffd166);
 
-    if (best > 0) cv.TextC($"best aura {best:000000}", 0xffd166, top + 11);
-    if (t % 1.25 < 0.8) cv.TextC("PRESS SPACE TO FARM", 0xffffff, top + 13);
-    cv.TextC("wasd / arrows move     space dash     q quit", 0x6a5a88, H - 2);
-    cv.TextC("no npcs were harmed. they were merely dodged.", 0x4e4068, H - 1);
+    if (best > 0) Ui.Badge(cv, (W - 13) / 2, top + 11, $"best {best:000000}", 0xffd166, 0x241a08);
+
+    Ui.Ticker(cv, H - 3, "no thoughts just aura  ·  main character syndrome  ·  npc energy detected  ·  log off eventually",
+        t, 0x8a7aa8, 0x5a4a72, 6);
+    Ui.Hints(cv, H - 1, "W/S", "select", "ENTER", "pick", "Q", "quit");
+}
+
+void DrawHelp()
+{
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(58, W - 2), Math.Min(17, H - 2), "how to play", 0xb9a7ff);
+    var x = x0 + 3;
+    var y = y0 + 2;
+    y += Ui.WrapDraw(cv, x, y,
+        "you are the main character. orbs are aura. npcs follow you around and drain it on contact, which is deeply rude.",
+        x1 - x - 2, Ui.Ink, 3) + 1;
+    Ui.KeyHint(cv, x, y, "WASD", "move", 0x7ff5e3); y++;
+    Ui.KeyHint(cv, x, y, "SPACE", "dash, and dodge straight through npcs", 0xb9a7ff); y++;
+    Ui.KeyHint(cv, x, y, "P", "pause + settings", Ui.Gold); y += 2;
+    cv.Set(x, y, '✦', Ui.Gold); cv.Text(x + 2, y, "aura - builds your streak multiplier", Ui.InkDim); y++;
+    cv.Set(x, y, '◈', 0xffd166); cv.Text(x + 2, y, "hyper aura - 1500 and a moment of invincibility", Ui.InkDim); y++;
+    cv.Set(x, y, '♥', 0xff9fc4); cv.Text(x + 2, y, "self care - restores a heart", Ui.InkDim);
+    cv.TextC("enter / esc to go back", Ui.InkFaint, y1 - 1);
+}
+
+void DrawPause()
+{
+    cv.Dim(0.45);
+    Settings.RefreshPauseLabels(pauseMenu);
+    var (_, y0, _, y1) = Ui.CenterCard(cv, 38, 11, "paused", Ui.Accent);
+    pauseMenu.Draw(cv, y0 + 2);
+    cv.TextC("P / ESC to resume", Ui.InkFaint, y1 - 1);
 }
 
 void DrawDead()
 {
-    var panelW = Math.Min(56, W - 4);
-    var x0 = (W - panelW) / 2;
-    var x1 = x0 + panelW - 1;
-    var y0 = H / 2 - 6;
-    var y1 = y0 + 11;
-    cv.Fill(x0, y0, x1, y1, ' ', 0x0e0617);
-    cv.Frame(x0, y0, x1, y1, 0xb9a7ff);
+    cv.Dim(0.35);
+    var (x0, y0, x1, y1) = Ui.CenterCard(cv, Math.Min(54, W - 2), Math.Min(18, H - 2), "run over", 0xff5c7a);
+    var cx = (x0 + x1) / 2;
     cv.TextC("aura -1,000,000", 0xff5c7a, y0 + 2);
     cv.TextC("the npcs got to you.", 0x8a7aa8, y0 + 3);
-    cv.TextC($"aura {aura:000000}    survived {gone}s", 0xf0e8ff, y0 + 5);
-    cv.TextC(newRecord ? "new personal best (humble brag)" : $"best aura {best:000000}", newRecord ? 0xffd166 : 0x6a5a88, y0 + 7);
-    if (fx.Time % 1.15 < 0.8) cv.TextC("SPACE again    ESC title    Q quit", 0xd8c8f0, y0 + 9);
+
+    var (rank, tier) = Ui.Rank(aura, new[] { 500, 1500, 3000, 6000, 10000, 18000 });
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 5, "aura", $"{aura:000000}", 0xf0e8ff);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 6, "survived", $"{gone}s", 0xf0e8ff);
+    Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 7, "rank", rank, Ui.RankColor(tier));
+    Ui.Divider(cv, x0 + 2, x1 - 2, y0 + 9);
+    if (newRecord) Ui.NewBest(cv, cx, y0 + 10, fx.Time);
+    else Ui.ScoreRow(cv, x0 + 3, x1 - 3, y0 + 10, "best aura", $"{best:000000}", 0xffd166);
+
+    deadMenu.Draw(cv, y0 + 12);
+    cv.TextC("R to run it back", Ui.InkFaint, y1 - 1);
 }
 
 sealed class Orb
@@ -469,6 +606,7 @@ sealed class Orb
     public double X;
     public double Y;
     public double Phase;
+    public int Kind;   // 0 aura, 1 hyper, 2 self care
 }
 
 sealed class Enemy
