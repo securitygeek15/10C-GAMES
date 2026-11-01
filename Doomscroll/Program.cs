@@ -340,7 +340,7 @@ void DrawPhone()
     cv.Set(tx + 19, y0 + 3, '━', 0xff4fa3);
     cv.Set(tx + 20, y0 + 3, '━', 0xff4fa3);
 
-    if (state == 2) return;
+    if (state == Dead) return;
 
     var cx0 = x0 + 2;
     var cx1 = x1 - 2;

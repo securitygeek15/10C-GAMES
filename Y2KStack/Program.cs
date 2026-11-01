@@ -251,12 +251,12 @@ void Lock()
         return;
     }
     Spawn();
-    if (state == 1 && Collides(curShape, curX, curY)) Over();
+    if (state == Playing && Collides(curShape, curX, curY)) Over();
 }
 
 void Over()
 {
-    if (state == 3) return;
+    if (state == OverState) return;
     state = 3;
     stateT = 0;
     shake = 12;
@@ -429,7 +429,7 @@ void DrawBoard()
             else cv.Set(wx + 1, wy, '·', 0x18243a);
         }
 
-    if (state is 1 or 2)
+    if (state is Playing or Paused)
     {
         var gy = curY;
         while (!Collides(curShape, curX, gy + 1)) gy++;
