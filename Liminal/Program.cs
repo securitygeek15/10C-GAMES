@@ -344,6 +344,7 @@ void Win()
     score = (int)(elapsed * 10) + tapes * 100 + 500;
     SaveBest();
     fx.Burst(ox + px, oy + py, 40, 0xffd166, 0x7ff5e3, 20, 1.2, 0, 2, '✦');
+    fx.Confetti(60, W, H, 0xffd166, 0x7ff5e3);
 }
 
 void Die()
